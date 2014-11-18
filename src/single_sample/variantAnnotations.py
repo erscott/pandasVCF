@@ -296,14 +296,15 @@ def get_vcf_annotations(df, sample_name, split_columns=''):
         df['multiallele'] = df.ALT.map(lambda x: 1 if "," in x else 0)  #1 is more than 1 alt allele, 0 else
         multidf = df.copy()
         multidf = multidf[multidf['multiallele'] == 1]
-        multidf = get_multiallelic_bases(multidf, sample_name)
+        if len(multidf) > 0:
+            multidf = get_multiallelic_bases(multidf, sample_name)
         
         df = df[~df.index.isin(multidf.index)]
         df = get_biallelic_bases(df, sample_name)
         sample_name = sample_name
         
-        
-        df = df.append(multidf)
+        if len(multidf) > 0:
+            df = df.append(multidf)
         
         df = zygosity_fast(df)
         df['vartype1'] = map(vartype_map, df[['REF','a1']].values)
