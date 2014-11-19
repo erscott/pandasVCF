@@ -52,3 +52,7 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# Specific files
+/ipynb/pdVCF.ipynb
+/ipynb/INDEL_counts.ipynb
