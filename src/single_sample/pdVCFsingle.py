@@ -133,6 +133,10 @@ class Vcf(object):
             print 'Sample genotype column not found, add_variant_annotations can only be called if the FORMAT and sample genotype columns are available?'
             return 1
         
+        if verbose:
+            print 'input variant rows:', len(self.df)
+            
+        self.df.drop_duplicates(inplace=True)
         
         var_counts = len(self.df)
         
@@ -141,7 +145,7 @@ class Vcf(object):
         if verbose:
             
             print 'dropping',var_counts - len(self.df), 'variants with genotype call == "." ' 
-            
+            print 'current variant rows:', len(self.df)
         
         
         if inplace:

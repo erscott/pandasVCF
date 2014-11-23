@@ -10,11 +10,25 @@ import pandas as pd
 
 
 
-def get_multiallelic_bases(df, sample_col, single_sample_vcf=True):
+def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
     '''
     This function parses multiallele variants into DNA base representations.
     It currently does not support haploid chromosomes.
     '''
+    df = df_orig.copy()
+    
+    def get_phase(line, sample_id):
+        '''
+        Returns phase from genotype
+        '''
+        genotype = line[sample_id]
+        if "|" in genotype:
+            return "|"
+        if "/" in genotype:
+            return "/"
+        else:
+            return '-'
+    
     
     def _get_allele(line, gt_col):
         '''
@@ -32,7 +46,7 @@ def get_multiallelic_bases(df, sample_col, single_sample_vcf=True):
 
 
     def get_GT_multisample_vcf(line, sample_col, gt_index):
-        return int( line[sample_col].split(line['phase'])[int(gt_index)])
+        return int( line[sample_col].split(':')[0].split(line['phase'])[int(gt_index)])
     
     
     if single_sample_vcf:
@@ -49,17 +63,23 @@ def get_multiallelic_bases(df, sample_col, single_sample_vcf=True):
 
 
     if not single_sample_vcf:
-        df['phase'] = df.apply(get_phase, args=['GT'], axis=1)  #get phase
+        df['phase'] = df.apply(get_phase, args=[sample_col], axis=1)  #get phase
         df = df[df.phase != "-"]  #likley occurs at sex chromosome sites
-        df['GT1'] = df.apply(get_GT_multisample, args=[sample_col, 0], axis=1)
-        df['GT2'] = df.apply(get_GT_multisample, args=[sample_col, 1], axis=1)
+        df['GT1'] = df.apply(get_GT_multisample_vcf, args=[sample_col, 0], axis=1)
+        df['GT2'] = df.apply(get_GT_multisample_vcf, args=[sample_col, 1], axis=1)
 
     
     
     #SLOW PROCESS MULTIPLE ALLELE GENOTYPES
-    df_multi = df[(df.GT1.astype(int)>1) | (df.GT2.astype(int)>1)] #select all multi-alleleic variants
+    df = df[(df.GT1.astype(int)>1) | (df.GT2.astype(int)>1)] #select all multi-alleleic variants
+    
+    #if len(df_multi) > 0:
+    #    df = df.append(df_multi)
+        
     df['a1'] = df.apply(_get_allele, args=['GT1'], axis=1)
     df['a2'] = df.apply(_get_allele, args=['GT2'], axis=1)
+
+    
 
     return df
 
@@ -110,15 +130,15 @@ def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
     #FAST PROCESS SIMPLE ALLELE GENOTYPES
     df_simple = df
     
-    df_gt1_ref = df_simple[df_simple.GT1==0][['REF']]  #get a1 ref alleles
+    df_gt1_ref = df_simple[df_simple.GT1.astype(int)==0][['REF']]  #get a1 ref alleles
     df_gt1_ref.columns = ['a1']
-    df_gt2_ref = df_simple[df_simple.GT2==0][['REF']]  #get a2 ref alleles
+    df_gt2_ref = df_simple[df_simple.GT2.astype(int)==0][['REF']]  #get a2 ref alleles
     df_gt2_ref.columns = ['a2']
 
 
-    df_gt1_alt = df_simple[df_simple.GT1==1][['ALT']]  #get a1 alt alleles
+    df_gt1_alt = df_simple[df_simple.GT1.astype(int)==1][['ALT']]  #get a1 alt alleles
     df_gt1_alt.columns = ['a1']
-    df_gt2_alt = df_simple[df_simple.GT2==1][['ALT']]  #get a2 alt alleles
+    df_gt2_alt = df_simple[df_simple.GT2.astype(int)==1][['ALT']]  #get a2 alt alleles
     df_gt2_alt.columns = ['a2']
 
 
@@ -126,12 +146,13 @@ def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
     #del gt1_alleles[0]
     gt2_alleles = pd.concat([df_gt2_ref,df_gt2_alt])  #merging GT2 allele bases into a single df
     #del gt2_alleles[0]
-    gt1_2_allele_df = gt1_alleles.join(gt2_alleles, how='outer')  #Joining the GT1 and GT2 simple allele bases 
+    gt1_2_allele_df = gt1_alleles.join(gt2_alleles)  #Joining the GT1 and GT2 simple allele bases 
 
-
-    df = df.join(gt1_2_allele_df, how='inner')  #Adding simle allele a1 and a2 columns to original df
-
-    return df
+    #print len(df)
+    
+    return df.join(gt1_2_allele_df)
+    
+    #print len(df)
 
 
 
@@ -294,17 +315,22 @@ def get_vcf_annotations(df, sample_name, split_columns=''):
      
     
         df['multiallele'] = df.ALT.map(lambda x: 1 if "," in x else 0)  #1 is more than 1 alt allele, 0 else
-        multidf = df.copy()
-        multidf = multidf[multidf['multiallele'] == 1]
-        if len(multidf) > 0:
-            multidf = get_multiallelic_bases(multidf, sample_name)
-        
+        multidf = df[df['multiallele'] == 1]
         df = df[~df.index.isin(multidf.index)]
+        #print len(multidf), 'multidf rows'
+        
+        if len(multidf) > 0:
+            multidf = get_multiallelic_bases(multidf, sample_name, single_sample_vcf=False)
+        
+        
+        #print 'single alleles', len(df)
+        
         df = get_biallelic_bases(df, sample_name)
         sample_name = sample_name
         
         if len(multidf) > 0:
             df = df.append(multidf)
+        
         
         df = zygosity_fast(df)
         df['vartype1'] = map(vartype_map, df[['REF','a1']].values)
@@ -314,7 +340,7 @@ def get_vcf_annotations(df, sample_name, split_columns=''):
         
         df.sortlevel(level=['CHROM','POS','REF','ALT'],inplace=True)  #sorting biallelic and multiallele variants 
         
-        
+        #print 'before parse_single_genotype_data', len(df)
         df = df.join( parse_single_genotype_data(df, sample_name, split_cols=split_columns), how='left' )
         del df[sample_name]
         if 'FORMAT' in df.columns:
