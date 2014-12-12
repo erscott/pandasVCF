@@ -2,7 +2,7 @@ import os,sys,gzip
 import pandas as pd
 from variantAnnotations import *
 from Vcf_metadata import *
-
+import numpy as np
 
 
 class Vcf(object):
@@ -21,7 +21,10 @@ class Vcf(object):
         
         #Sample IDs
         self.samples = list(self.header_df.ix['SampleIDs'])[0]
-        self.sample_id = sample_id
+        if sample_id == 'all':
+            self.sample_id = self.samples[:]
+        else:
+            self.sample_id = [sample_id]
         
         
         #Columns
@@ -33,25 +36,16 @@ class Vcf(object):
         self.cols = cols
         if len(cols) > 0:
             self.usecols = [c for c in self.all_columns if c in cols]
-            if self.sample_id == 'all':
-                self.usecols.extend(self.samples)
-                self.sample_id = self.samples
-            elif: len(sample_id) > 1:
+            if len(sample_id) > 0:
                 self.usecols.extend(self.sample_id)
-            else:
-                self.usecols.extend([self.sample_id])
+            else: 
+                assert False, 'no sample IDs'
         else:
             self.usecols = [s for s in self.cols if s not in self.samples]
-            if sample_id == 'all':
-                self.usecols.extend(self.samples)
-                self.sample_id = self.samples
-            else:
-                self.usecols.extend(self.sample_id)
+            self.usecols.extend(self.sample_id)
         
         #Open pandas chunk object (TextReader)
         self.chunksize = chunksize
-        print self.usecols
-        assert False
         self.vcf_chunks = pd.read_table(filename, sep="\t", compression=header_parsed.compression, skiprows=(len(self.header_df)-2), usecols=self.usecols, chunksize=chunksize)
     
     
@@ -82,7 +76,7 @@ class Vcf(object):
         self.df = self.vcf_chunks.get_chunk()
         self.df.columns = [c.replace('#', '') for c in self.usecols]
         self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'], inplace=True, drop=False)
-        
+
         self.df_bytes = self.df.values.nbytes + self.df.index.nbytes + self.df.columns.nbytes
         
         return 0
@@ -140,34 +134,60 @@ class Vcf(object):
             
             '''
         
-        if self.sample_id not in self.df.columns:
-            print 'Sample genotype column not found, add_variant_annotations can only be called if the FORMAT and sample genotype columns are available?'
-            return 1
         
-        if verbose:
-            print 'input variant rows:', len(self.df)
         
-        self.df.drop_duplicates(inplace=True)
+        self.df_groups = self.df.groupby('FORMAT')
         
-        var_counts = len(self.df)
-        
-        self.df = self.df[self.df[self.sample_id]!='.']  #dropping missing genotype calls
-        
-        if verbose:
+        parsed_df = []
+        for i,df_format in self.df_groups:
             
-            print 'dropping',var_counts - len(self.df), 'variants with genotype call == "." '
-            print 'current variant rows:', len(self.df)
+            df_format = df_format[df_format['ALT'] != '.']
+            df_format = df_format[self.sample_id]
+            df_format = df_format.replace(to_replace='.', value=np.NaN)
+            df_format = pd.DataFrame( df_format.stack(), columns=['sample_genotypes'] )
+            df_format.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']
+            df_format.reset_index(inplace=True)
+            df_format.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'], drop=False, inplace=True)
+            df_format['FORMAT'] = i
+            df_format.drop_duplicates(inplace=True)
+            parsed_df.append( get_vcf_annotations(df_format, 'sample_genotypes', split_columns=split_columns) )
+            
         
+        self.df_annot = pd.concat(parsed_df)
         
-        if inplace:
-            if 'POS' not in self.df.columns:
-                self.df.reset_index(inplace=True)
-                self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'],inplace=True, drop=False)
-            self.df = get_vcf_annotations(self.df, self.sample_id, split_columns)
-        else:
-            self.df_annot = get_vcf_annotations(self.df, self.sample_id, split_columns)
-            self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'],inplace=True)
+        del self.df_groups
         
         return 0
+        
+        
+#        if set(self.sample_id) - set(self.df.columns) > 0:
+#            print 'Sample genotype column not found, add_variant_annotations can only be called if the FORMAT and sample genotype columns are available?'
+#            return 1
+#        
+#        if verbose:
+#            print 'input variant rows:', len(self.df)
+#        
+#        self.df.drop_duplicates(inplace=True)
+#        
+#        var_counts = len(self.df)
+#        
+#        self.df = self.df[self.df[self.sample_id]!='.']  #dropping missing genotype calls
+#        
+#        if verbose:
+#            
+#            print 'dropping',var_counts - len(self.df), 'variants with genotype call == "." '
+#            print 'current variant rows:', len(self.df)
+#        
+#        
+#        if inplace:
+#            if 'POS' not in self.df.columns:
+#                self.df.reset_index(inplace=True)
+#                self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'],inplace=True, drop=False)
+#            self.df = get_vcf_annotations(self.df, self.sample_id, split_columns)
+#        else:
+#            self.df_annot = get_vcf_annotations(self.df, self.sample_id, split_columns)
+#            self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'],inplace=True)
+#        
+#        return 0
 
 

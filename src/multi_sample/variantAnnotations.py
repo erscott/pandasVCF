@@ -6,7 +6,7 @@ VCF DNA variant
 
 import os,sys,gzip
 import pandas as pd
-
+import numpy as np
 
 
 
@@ -36,7 +36,7 @@ def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
         '''
         
         alleles = [line['REF']]
-        alleles.extend(line['ALT'].split(","))
+        alleles.extend(list( line['ALT'].split(",")) )
         a1 = "."
         try:
             a1 = alleles[int(line[gt_col])]  #returns missing if gt_int_call is "."
@@ -46,28 +46,33 @@ def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
 
 
     def get_GT_multisample_vcf(line, sample_col, gt_index):
-        return int( line[sample_col].split(':')[0].split(line['phase'])[int(gt_index)])
+        return line[sample_col].split(':')[0].split(line['phase'])[int(gt_index)]
+
     
-    
-    if single_sample_vcf:
-        df['phase'] = df[sample_col].str[1]
-        df = df[df['phase']!=':']  #removing haploid variants
-        
-        df['GT1'] = df[sample_col].str[0]
-        df = df[df['GT1']!='.']  #removing variants with missing calls
-        df['GT1'] = df['GT1'].astype(int)
-        
-        df['GT2'] = df[sample_col].str[2]
-        df = df[df['GT2']!='.']  #removing variants with missing calls
-        df['GT2'] = df['GT2'].astype(int)
+#    if single_sample_vcf:
+#        df['phase'] = df[sample_col].str[1]
+#        df = df[df['phase']!=':']  #removing haploid variants
+#        
+#        df['GT1'] = df[sample_col].str[0]
+#        df = df[df['GT1']!='.']  #removing variants with missing calls
+#        df['GT1'] = df['GT1'].astype(int)
+#        
+#        df['GT2'] = df[sample_col].str[2]
+#        df = df[df['GT2']!='.']  #removing variants with missing calls
+#        df['GT2'] = df['GT2'].astype(int)
 
 
     if not single_sample_vcf:
         df['phase'] = df.apply(get_phase, args=[sample_col], axis=1)  #get phase
         df = df[df.phase != "-"]  #likley occurs at sex chromosome sites
+        
         df['GT1'] = df.apply(get_GT_multisample_vcf, args=[sample_col, 0], axis=1)
+        df = df[ (df['GT1']!='.') & (df['GT1']!=np.NaN)]
+        df['GT1'] = df['GT1'].astype(int)
+        
         df['GT2'] = df.apply(get_GT_multisample_vcf, args=[sample_col, 1], axis=1)
-
+        df = df[ (df['GT2']!='.') & (df['GT2']!=np.NaN)]
+        df['GT2'] = df['GT2'].astype(int)
     
     
     #SLOW PROCESS MULTIPLE ALLELE GENOTYPES
@@ -106,7 +111,7 @@ def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
 
 
     def get_GT_multisample_vcf(line, sample_col, gt_index):
-        return int( line[sample_col].split(line['phase'])[int(gt_index)])
+        return int(line[sample_col].split(line['phase'])[int(gt_index)])
 
 
     if single_sample_vcf:
@@ -124,7 +129,9 @@ def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
         df['phase'] = df.apply(get_phase, args=['GT'], axis=1)  #get phase
         df = df[df.phase != "-"]  #likley occurs at sex chromosome sites
         df['GT1'] = df.apply(get_GT_multisample, args=[sample_col, 0], axis=1)
+        df = df[df['GT1']!='.']
         df['GT2'] = df.apply(get_GT_multisample, args=[sample_col, 1], axis=1)
+        df = df[df['GT2']!='.']
 
 
     #FAST PROCESS SIMPLE ALLELE GENOTYPES
@@ -257,7 +264,7 @@ def parse_single_genotype_data(df, sample_id, split_cols=''):
 
     #Concatenating all genotype groups
     sample_df = pd.concat(master_df)
-    sample_df.index.names = ['CHROM', 'POS', 'REF', 'ALT']
+    sample_df.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']
 
     #spliting user-defined columns
     if split_cols != '':
@@ -270,7 +277,7 @@ def parse_single_genotype_data(df, sample_id, split_cols=''):
 
 
 
-def get_vcf_annotations(df, sample_name, split_columns=''):
+def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
         '''
         This function adds the following annotations for each variant:
         multiallele, phase, a1, a2, GT1, GT2, vartype1, vartype2, zygosity,
@@ -285,6 +292,11 @@ def get_vcf_annotations(df, sample_name, split_columns=''):
                     key:FORMAT id value:#fields expected
                     e.g. {'AD':2} indicates Allelic Depth should be
                     split into 2 columns.
+        
+        drop_hom_ref: bool, optional
+                    specifies whether to drop all homozygous reference
+                    variants from dataframe.
+                    FALSE REQUIRES LARGE MEMORY FOOTPRINT
         
         Output
         --------------
@@ -313,9 +325,8 @@ def get_vcf_annotations(df, sample_name, split_columns=''):
         
         '''
      
-    
-        df['multiallele'] = df.ALT.map(lambda x: 1 if "," in x else 0)  #1 is more than 1 alt allele, 0 else
-        multidf = df[df['multiallele'] == 1]
+        df['multiallele'] = df.ALT.str.count(',')
+        multidf = df[df['multiallele'] > 0]
         df = df[~df.index.isin(multidf.index)]
         #print len(multidf), 'multidf rows'
         
@@ -333,18 +344,33 @@ def get_vcf_annotations(df, sample_name, split_columns=''):
         
         
         df = zygosity_fast(df)
+        
+        if drop_hom_ref:
+            #recording number of homozygous reference calls for each variant
+            hom_ref_counts = df.groupby(level=[0,1,2,3])['zygosity'].value_counts()
+            hom_ref_counts = hom_ref_counts.unstack(level=4)['hom-ref']
+            hom_ref_counts.name = 'hom_ref_counts'
+            
+            df.reset_index(level=4, inplace=True, drop=True)
+            df = df[df['zygosity']!='hom-ref']  #dropping all homozygous reference variants
+            df = df.join(hom_ref_counts, how='left')
+            df['hom_ref_counts'].fillna(value=0, inplace=True)
+        
         df['vartype1'] = map(vartype_map, df[['REF','a1']].values)
         df['vartype2'] = map(vartype_map, df[['REF','a2']].values)
         
-        df.set_index(['CHROM', 'POS', 'REF', 'ALT'], inplace=True)
+        df.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'], inplace=True)
         
-        df.sortlevel(level=['CHROM','POS','REF','ALT'],inplace=True)  #sorting biallelic and multiallele variants 
+        #df.sortlevel(level=['CHROM','POS','REF','ALT','sample_ids'],inplace=True)  #sorting biallelic and multiallele variants 
         
         #print 'before parse_single_genotype_data', len(df)
+        
+        
         df = df.join( parse_single_genotype_data(df, sample_name, split_cols=split_columns), how='left' )
         del df[sample_name]
         if 'FORMAT' in df.columns:
             del df['FORMAT']
+        
         
         return df
 
