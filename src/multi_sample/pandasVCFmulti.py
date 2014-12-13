@@ -3,6 +3,7 @@ import pandas as pd
 from variantAnnotations import *
 from Vcf_metadata import *
 import numpy as np
+import gc
 
 
 class Vcf(object):
@@ -23,6 +24,7 @@ class Vcf(object):
         self.samples = list(self.header_df.ix['SampleIDs'])[0]
         if sample_id == 'all':
             self.sample_id = self.samples[:]
+            #self.sample_id.remove('')
         else:
             self.sample_id = [sample_id]
         
@@ -74,15 +76,36 @@ class Vcf(object):
             '''
         
         self.df = self.vcf_chunks.get_chunk()
+        self.df.drop_duplicates(inplace=True)
         self.df.columns = [c.replace('#', '') for c in self.usecols]
         self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'], inplace=True, drop=False)
-
+        
         self.df_bytes = self.df.values.nbytes + self.df.index.nbytes + self.df.columns.nbytes
         
         return 0
     
     
-    def add_variant_annotations(self, split_columns='', verbose=False, inplace=False):
+    def drop_hom_ref_df(self, df):
+        
+        #recording number of homozygous reference calls for each variant
+        
+        df_hom_ref = df[df['sample_genotypes'].isin(['0|0','0/0'])]  #dropping all homozygous reference
+        df = df[~df.index.isin(df_hom_ref.index)]
+        
+        df_hom_ref['count'] = 1
+        hom_ref_counts = df_hom_ref.groupby(level=[0,1,2,3])['count'].aggregate(np.sum)
+        hom_ref_counts.name = 'hom_ref_counts'
+        
+        
+        df.reset_index(level=4, inplace=True, drop=True)
+        df = df.join(hom_ref_counts, how='left')
+        df['hom_ref_counts'].fillna(value=0, inplace=True)
+        df.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'], inplace=True, drop=False)
+        return df
+    
+    
+    
+    def add_variant_annotations(self, split_columns='', verbose=False, inplace=False, drop_hom_ref=True):
         
         '''
             This function adds the following annotations for each variant:
@@ -98,13 +121,19 @@ class Vcf(object):
             split into 2 columns.
             
             verbose: bool, default=False
-            This will describe how many missing variants were dropped
+                This will describe how many missing variants were dropped
             
             inplace: bool, default=False
-            This will replace the sample_id column with parsed columns,
-            and drop the FORMAT field.  If True, this will create an
-            additional dataframe, df_annot, to the Vcf object composed of
-            the parsed columns (memory intensive)
+                This will replace the sample_id column with parsed columns,
+                and drop the FORMAT field.  If True, this will create an
+                additional dataframe, df_annot, to the Vcf object composed of
+                the parsed columns (memory intensive)
+            
+            drop_hom_ref: bool, default=True
+                If True this will count homozygous reference genotype calls for each
+                variant, add these counts as a df column and drop all hom-ref
+                variant calls from the df_annot dataframe.  10X faster than not
+                dropping if large multi-sample vcf, e.g. 1000genomes
             
             
             
@@ -139,7 +168,7 @@ class Vcf(object):
         self.df_groups = self.df.groupby('FORMAT')
         
         parsed_df = []
-        for i,df_format in self.df_groups:
+        for i,df_format in self.df_groups: #iterating through FORMAT groups
             
             df_format = df_format[df_format['ALT'] != '.']
             df_format = df_format[self.sample_id]
@@ -150,12 +179,20 @@ class Vcf(object):
             df_format.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'], drop=False, inplace=True)
             df_format['FORMAT'] = i
             df_format.drop_duplicates(inplace=True)
+            if drop_hom_ref:
+                df_format = self.drop_hom_ref_df(df_format)
             parsed_df.append( get_vcf_annotations(df_format, 'sample_genotypes', split_columns=split_columns) )
-            
-        
-        self.df_annot = pd.concat(parsed_df)
+            #parsed_df.append( df_format )
         
         del self.df_groups
+        gc.collect()
+        
+        if inplace:
+            self.df = pd.concat(parsed_df)
+        else:
+            self.df_annot = pd.concat(parsed_df)
+        
+        
         
         return 0
         

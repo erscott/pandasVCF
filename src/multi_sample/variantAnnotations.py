@@ -10,7 +10,7 @@ import numpy as np
 
 
 
-def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
+def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=False):
     '''
     This function parses multiallele variants into DNA base representations.
     It currently does not support haploid chromosomes.
@@ -49,17 +49,17 @@ def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
         return line[sample_col].split(':')[0].split(line['phase'])[int(gt_index)]
 
     
-#    if single_sample_vcf:
-#        df['phase'] = df[sample_col].str[1]
-#        df = df[df['phase']!=':']  #removing haploid variants
-#        
-#        df['GT1'] = df[sample_col].str[0]
-#        df = df[df['GT1']!='.']  #removing variants with missing calls
-#        df['GT1'] = df['GT1'].astype(int)
-#        
-#        df['GT2'] = df[sample_col].str[2]
-#        df = df[df['GT2']!='.']  #removing variants with missing calls
-#        df['GT2'] = df['GT2'].astype(int)
+    if single_sample_vcf:
+        df['phase'] = df[sample_col].str[1]
+        df = df[df['phase']!=':']  #removing haploid variants
+        
+        df['GT1'] = df[sample_col].str[0]
+        df = df[df['GT1']!='.']  #removing variants with missing calls
+        df['GT1'] = df['GT1'].astype(int)
+        
+        df['GT2'] = df[sample_col].str[2]
+        df = df[df['GT2']!='.']  #removing variants with missing calls
+        df['GT2'] = df['GT2'].astype(int)
 
 
     if not single_sample_vcf:
@@ -116,12 +116,12 @@ def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
 
     if single_sample_vcf:
         df['phase'] = df[sample_col].str[1]
-        df = df[df['phase']!=':']
+        df = df[df['phase'].astype(str)!=':']
         df['GT1'] = df[sample_col].str[0]
         df = df[df['GT1']!='.']
         df['GT1'] = df['GT1'].astype(int)
         df['GT2'] = df[sample_col].str[2]
-        df = df[df['GT2']!='.']
+        df = df[df['GT2']!='.'] 
         df['GT2'] = df['GT2'].astype(int)
 
 
@@ -330,6 +330,7 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
         df = df[~df.index.isin(multidf.index)]
         #print len(multidf), 'multidf rows'
         
+        
         if len(multidf) > 0:
             multidf = get_multiallelic_bases(multidf, sample_name, single_sample_vcf=False)
         
@@ -337,7 +338,6 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
         #print 'single alleles', len(df)
         
         df = get_biallelic_bases(df, sample_name)
-        sample_name = sample_name
         
         if len(multidf) > 0:
             df = df.append(multidf)
@@ -345,23 +345,13 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
         
         df = zygosity_fast(df)
         
-        if drop_hom_ref:
-            #recording number of homozygous reference calls for each variant
-            hom_ref_counts = df.groupby(level=[0,1,2,3])['zygosity'].value_counts()
-            hom_ref_counts = hom_ref_counts.unstack(level=4)['hom-ref']
-            hom_ref_counts.name = 'hom_ref_counts'
-            
-            df.reset_index(level=4, inplace=True, drop=True)
-            df = df[df['zygosity']!='hom-ref']  #dropping all homozygous reference variants
-            df = df.join(hom_ref_counts, how='left')
-            df['hom_ref_counts'].fillna(value=0, inplace=True)
         
         df['vartype1'] = map(vartype_map, df[['REF','a1']].values)
         df['vartype2'] = map(vartype_map, df[['REF','a2']].values)
         
         df.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'], inplace=True)
         
-        #df.sortlevel(level=['CHROM','POS','REF','ALT','sample_ids'],inplace=True)  #sorting biallelic and multiallele variants 
+        df.sortlevel(level=['CHROM','POS','REF','ALT','sample_ids'],inplace=True)  #sorting biallelic and multiallele variants 
         
         #print 'before parse_single_genotype_data', len(df)
         
