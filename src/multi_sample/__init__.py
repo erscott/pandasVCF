@@ -1,2 +1,2 @@
 
-__all__ = ['Vcfmetadata', 'variantAnnotations']
+__all__ = ['Vcfmetadata', 'variantAnnotations_multi']
