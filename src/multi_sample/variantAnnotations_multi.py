@@ -420,7 +420,7 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
             df_format['sample_genotypes'] = df_qual[format.split(':')[0]]  #setting just the GT calls
             del df_qual['GT']  #removing from df_qual to avoid joining problems with df_format after add_annotations
             
-
+        
         
         
         #DROPPING MISSING CALLS
