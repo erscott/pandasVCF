@@ -77,10 +77,11 @@ class Vcf(object):
         except StopIteration:
             self.stopIteration = True
             print 'End of File Reached'
-            self.df = None
+            #self.df = None
             return 1
         self.df.drop_duplicates(inplace=True)  #dropping duplicate rows
         self.df.columns = [c.replace('#', '') for c in self.usecols]
+        self.df['CHROM'] = self.df['CHROM'].astype(str).str.replace('chr','')
         self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'], inplace=True, drop=False)
         
         
@@ -90,7 +91,7 @@ class Vcf(object):
 
 
     
-    def add_variant_annotations(self, split_columns='', verbose=False, inplace=False):
+    def add_variant_annotations(self, split_columns='', verbose=False, inplace=False, drop_hom_ref=True):
         
         '''
         This function adds the following annotations for each variant:
@@ -145,14 +146,17 @@ class Vcf(object):
             print 'End of File Reached'
             return 1
         
+        self.drop_hom_ref = drop_hom_ref
+        
+        
         if self.n_cores == 1:
             if inplace:
-                self.df =  process_variant_annotations( [self.df, split_columns, self.sample_id] )
+                self.df =  process_variant_annotations( [self.df, split_columns, self.sample_id, self.drop_hom_ref] )
             else:
-                self.df_annot =  process_variant_annotations( [self.df, split_columns, self.sample_id] )
+                self.df_annot =  process_variant_annotations( [self.df, split_columns, self.sample_id, self.drop_hom_ref] )
            
         else:
-            var_annot =  mp_variant_annotations(self.df.copy(), split_columns, self.sample_id, self.n_cores)
+            var_annot =  mp_variant_annotations(self.df.copy(), split_columns, self.sample_id, self.drop_hom_ref, self.n_cores)
             
             if inplace:
                 self.df =  var_annot
