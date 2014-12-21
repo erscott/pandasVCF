@@ -86,9 +86,8 @@ def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
             haploid_df['a1'] = haploid_df.apply(_get_allele, args=['GT1'], axis=1)
             haploid_df['a2'] = haploid_df.apply(_get_allele, args=['GT2'], axis=1)
         
+        df = df[df.phase != "-"]
         if len(df) > 0:
-        
-            df = df[df.phase != "-"]
             
             df['GT1'] = df.apply(get_GT_multisample_vcf, args=[sample_col, 0], axis=1)
             df = df[ (df['GT1']!='.') & (df['GT1']!=np.NaN)]
@@ -115,8 +114,10 @@ def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
             return df
         else:
             return df
-    else:
+    if len(haploid_df) > 0:
         return haploid_df
+    else:
+        return pd.DataFrame()
 
 
 
@@ -231,29 +232,31 @@ def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
 
     #FAST PROCESS SIMPLE ALLELE GENOTYPES
     df_simple = df
+    if len(df_simple) > 0:
+        df_gt1_ref = df_simple[df_simple.GT1.astype(int)==0][['REF']]  #get a1 ref alleles
+        df_gt1_ref.columns = ['a1']
+        df_gt2_ref = df_simple[df_simple.GT2.astype(int)==0][['REF']]  #get a2 ref alleles
+        df_gt2_ref.columns = ['a2']
     
-    df_gt1_ref = df_simple[df_simple.GT1.astype(int)==0][['REF']]  #get a1 ref alleles
-    df_gt1_ref.columns = ['a1']
-    df_gt2_ref = df_simple[df_simple.GT2.astype(int)==0][['REF']]  #get a2 ref alleles
-    df_gt2_ref.columns = ['a2']
-
-
-    df_gt1_alt = df_simple[df_simple.GT1.astype(int)==1][['ALT']]  #get a1 alt alleles
-    df_gt1_alt.columns = ['a1']
-    df_gt2_alt = df_simple[df_simple.GT2.astype(int)==1][['ALT']]  #get a2 alt alleles
-    df_gt2_alt.columns = ['a2']
-
-
-    gt1_alleles = pd.concat([df_gt1_ref,df_gt1_alt])  #merging GT1 allele bases into a single df
-    #del gt1_alleles[0]
-    gt2_alleles = pd.concat([df_gt2_ref,df_gt2_alt])  #merging GT2 allele bases into a single df
-    #del gt2_alleles[0]
-    gt1_2_allele_df = gt1_alleles.join(gt2_alleles)  #Joining the GT1 and GT2 simple allele bases 
-
-    #print len(df)
     
-    return df.join(gt1_2_allele_df)
+        df_gt1_alt = df_simple[df_simple.GT1.astype(int)==1][['ALT']]  #get a1 alt alleles
+        df_gt1_alt.columns = ['a1']
+        df_gt2_alt = df_simple[df_simple.GT2.astype(int)==1][['ALT']]  #get a2 alt alleles
+        df_gt2_alt.columns = ['a2']
     
+    
+        gt1_alleles = pd.concat([df_gt1_ref,df_gt1_alt])  #merging GT1 allele bases into a single df
+        #del gt1_alleles[0]
+        gt2_alleles = pd.concat([df_gt2_ref,df_gt2_alt])  #merging GT2 allele bases into a single df
+        #del gt2_alleles[0]
+        gt1_2_allele_df = gt1_alleles.join(gt2_alleles)  #Joining the GT1 and GT2 simple allele bases 
+    
+        #print len(df)
+        
+        return df.join(gt1_2_allele_df)
+    
+    else:
+        return pd.DataFrame()
     #print len(df)
 
 
@@ -329,6 +332,22 @@ def vartype_map(ref_alt_bases):
 
 
 
+def get_hom_ref_counts(df):
+    '''
+    This function calculates the number of homozygous reference variant
+    calls in a dataframe assuming the df is indexed on:
+    ['CHROM', 'POS', 'REF', 'ALT'] in that order.
+    
+    Also assumes the homozygous reference values are ascribed:
+        0|0 , 0/0 , 0
+    '''
+    hom_ref = df[df['GT'].isin(['0|0', '0/0', '0'])]
+    hom_ref['hom_ref'] = 1
+    return hom_ref.groupby(level=[0,1,2,3])['hom_ref'].aggregate(np.sum)
+
+
+
+
 def parse_single_genotype_data(df, sample_id, split_cols=''):
     '''
     This function parses the genotype sample column and left joins to
@@ -379,35 +398,35 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
     df_groups = df_vars.groupby('FORMAT')
     
     parsed_df = []
-    for i,df_format in df_groups:  #iterate through different FORMAT types
+    for format,df_format in df_groups:  #iterate through different FORMAT types
+        
         
         df_format = df_format[df_format['ALT'] != '.']  #dropping missing ALT alleles
         df_format = df_format[sample_id]  #only consider sample columns
         df_format = df_format.replace(to_replace='.', value=np.NaN)  #replacing missing calls with None
         
-
+        
         df_format = pd.DataFrame( df_format.stack(), columns=['sample_genotypes'] )  #stacks sample calls and drops none calls
         
-    
+        if len(df_format) <1:  #occurs when all calls are empty
+            continue  
+        
         #SAVE QUALITY INFORMATION SEPARETELY TO AVOID ANNOTATION PROCESSING IDENTICAL GENOTYPE CALLS (DIFFERENT QUALITY DOESNT MATTER)
-        if i.count(':') > 0:
-            df_qual = pd.DataFrame(list(df_format['sample_genotypes'].str.split(':') ), index = df_format.index) #qual df, setting aside for later joining
-            df_qual.columns = i.split(':')  #setting quality column names
+        if format.count(':') > 0:
+            df_qual = pd.DataFrame(list(df_format['sample_genotypes'].str.split(':') ), index=df_format.index) #qual df, setting aside for later joining
+            #print df_format.head(), format.split(':')
+            df_qual.columns = format.split(':')  #setting quality column names
             df_qual.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']  #setting index names for joining with df_format later
-            df_format['sample_genotypes'] = df_qual[i.split(':')[0]]  #setting just the GT calls
+            df_format['sample_genotypes'] = df_qual[format.split(':')[0]]  #setting just the GT calls
             del df_qual['GT']  #removing from df_qual to avoid joining problems with df_format after add_annotations
             
-            #ToDo: FIX SPLIT COLUMNS
-#             if split_columns != '':
-#                 for col in split_columns:
-#                     for i in range(0, split_columns[col]):
-#                         df_qual[col + '_' + str(i)] = df_qual[col].str.split(',').str[i]
-#                     del df_qual[col] 
+
+        
         
         #DROPPING MISSING CALLS
-        df_format = df_format[ (df_format['sample_genotypes']!='./.') & (df_format['sample_genotypes']!='.|.')]
-
-
+        df_format = df_format[ (df_format['sample_genotypes']!='./.') & (df_format['sample_genotypes']!='.|.') \
+                              & (df_format['sample_genotypes']!='.') ]
+        
         #SETTING INDICES
         df_format.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']  #setting index names
         df_format.reset_index(inplace=True)
@@ -415,7 +434,7 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
         
         #ONLY NEED TO PASS UNIQUE GENOTYPE CALLS DF TO get_vcf_annotations, then broadcast back to df_format
         df_annotations = df_format.drop_duplicates(subset=['CHROM', 'POS', 'REF', 'ALT', 'sample_genotypes'])
-        df_annotations['FORMAT'] = i.split(':')[0]  #setting format id
+        df_annotations['FORMAT'] = format.split(':')[0]  #setting format id
         df_annotations.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_genotypes'], drop=False, inplace=True)
         df_annotations = get_vcf_annotations(df_annotations, 'sample_genotypes', split_columns=split_columns)  #getting annotations
         
@@ -427,38 +446,42 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
         
         
         #df_format.set_index('sample_ids', drop=True, inplace=True, append=True)
-        df_format['FORMAT'] = i
+        df_format['FORMAT'] = format
         df_format.reset_index(level=4, inplace=True, drop=False)
         
-        #SUPER SLOW!!!!!!!!!! NEED TO OPTIMIZE
-#         if 1==1:#drop_hom_ref:
-#             #recording number of homozygous reference calls for each variant
-#             hom_ref_counts = df_format.groupby(level=[0,1,2,3])['zygosity'].value_counts()
-#          
-#             if 'hom-ref' in hom_ref_counts.index.get_level_values(4):  #FIXED  DECEMBER 17th 2014
-#                 hom_ref_counts = hom_ref_counts.unstack(level=4)['hom-ref']
-#                 hom_ref_counts.name = 'hom_ref_counts'
-#                  
-#                 #df_format.reset_index(level=4, inplace=True, drop=True)
-#                 df_format = df_format[df_format['zygosity']!='hom-ref']  #dropping all homozygous reference variants
-#                 df_format = df_format.join(hom_ref_counts, how='left')
-#                 df_format['hom_ref_counts'].fillna(value=0, inplace=True)
         
+        if drop_hom_ref:
+            hom_ref_counts = get_hom_ref_counts(df_format)
+            hom_ref_counts.name = 'hom_ref_counts'
+            df_format = df_format[df_format['zygosity']!='hom-ref']  #dropping all homozygous reference variants
+            df_format = df_format.join(hom_ref_counts)
+            df_format['hom_ref_counts'].fillna(value=0, inplace=True)
         
         del df_format['sample_genotypes']
         df_format.set_index('sample_ids', inplace=True, append=True, drop=True)
         
-        #JOINING QUAL INFO BACK TO DF
-        if i.count(':') > 0 and len(df_qual) > 0:
+        
+        ##JOINING QUAL INFO BACK TO DF
+        if format.count(':') > 0 and len(df_qual) > 0:
             df_format = df_format.join(df_qual, how='left')
             pass
         
-
+        #SPLITTING GENOTYPE QUALITY COLUMNS
+        if split_columns != '':
+            for col in split_columns:
+                split_col_names = [col + '_' + str(n) for n in range(0, split_columns[col]) ]
+                df_format = df_format.join(pd.DataFrame(list(df_format[col].str.split(',').str[:len(split_col_names)]), index=df_format.index, columns=split_col_names))
+                del df_format[col]
+        
+        
+        
         parsed_df.append(df_format)
-
         
     
+    
     df_annot = pd.concat(parsed_df)
+    
+
     
     return df_annot
 
@@ -528,50 +551,53 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
         
         
         '''
-     
         
-
+        
+        
         df['multiallele'] = df.ALT.str.count(',')
         multidf = df[df['multiallele'] > 0]
-        df = df[~df.index.isin(multidf.index)]
-        #print len(multidf), 'multidf rows'
-        
-        if len(multidf) > 0:
-            multidf = get_multiallelic_bases(multidf, sample_name, single_sample_vcf=False)
-        
-        
-        #print 'single alleles', len(df)
-        
-        df = get_biallelic_bases(df, sample_name)
-        
-        
-        if len(multidf) > 0:
-            df = df.append(multidf)
-        
-        
-        df = zygosity_fast(df)
-        
-   
-        df['vartype1'] = map(vartype_map, df[['REF','a1']].values)
-        df['vartype2'] = map(vartype_map, df[['REF','a2']].values)
-        
-        df.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'], inplace=True)
-        
-        #df.sortlevel(level=['CHROM','POS','REF','ALT','sample_ids'],inplace=True)  #sorting biallelic and multiallele variants 
-        
-        #print 'before parse_single_genotype_data', len(df)
-        
-        
-        #df = df.join( parse_single_genotype_data(df, sample_name, split_cols=split_columns), how='left' )
-        df['GT'] = df['sample_genotypes']
-        del df[sample_name]
-        if 'FORMAT' in df.columns:
-            del df['FORMAT']
-        
-        df.reset_index(level=4, inplace=True, drop=True)
-        df.set_index('GT', inplace=True, drop=False,append=True)
-        return df
-
+            
+        while len(df) > 0 | len(multidf) > 0:
+            
+            df = df[~df.index.isin(multidf.index)]
+            #print len(multidf), 'multidf rows'
+            
+            if len(multidf) > 0:
+                multidf = get_multiallelic_bases(multidf, sample_name, single_sample_vcf=False)
+            
+            
+            #print 'single alleles', len(df)
+            
+            df = get_biallelic_bases(df, sample_name)
+            
+            
+            if len(multidf) > 0:
+                df = df.append(multidf)
+            
+            
+            df = zygosity_fast(df)
+            
+            
+            df['vartype1'] = map(vartype_map, df[['REF','a1']].values)
+            df['vartype2'] = map(vartype_map, df[['REF','a2']].values)
+            
+            df.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'], inplace=True)
+            
+            #df.sortlevel(level=['CHROM','POS','REF','ALT','sample_ids'],inplace=True)  #sorting biallelic and multiallele variants 
+            
+            #print 'before parse_single_genotype_data', len(df)
+            
+            
+            #df = df.join( parse_single_genotype_data(df, sample_name, split_cols=split_columns), how='left' )
+            df['GT'] = df['sample_genotypes']
+            del df[sample_name]
+            if 'FORMAT' in df.columns:
+                del df['FORMAT']
+            
+            df.reset_index(level=4, inplace=True, drop=True)
+            df.set_index('GT', inplace=True, drop=False,append=True)
+            return df
+        return pd.DataFrame()
 
 
 
