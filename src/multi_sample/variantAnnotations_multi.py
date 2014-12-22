@@ -440,9 +440,11 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
         
         
         #SETTING INDICES AGAIN
+        if len(df_annotations) < 1: continue  #continue if no variants within this FORMAT category
         df_format.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_genotypes'], drop=True, inplace=True)
         df_annotations.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_genotypes']
         df_format = df_format.join(df_annotations)
+        
         
         
         #df_format.set_index('sample_ids', drop=True, inplace=True, append=True)
@@ -461,6 +463,7 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
         df_format.set_index('sample_ids', inplace=True, append=True, drop=True)
         
         
+        
         ##JOINING QUAL INFO BACK TO DF
         if format.count(':') > 0 and len(df_qual) > 0:
             df_format = df_format.join(df_qual, how='left')
@@ -474,16 +477,15 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
                 del df_format[col]
         
         
-        
         parsed_df.append(df_format)
         
-    
-    
-    df_annot = pd.concat(parsed_df)
-    
-
-    
-    return df_annot
+        
+    if len(parsed_df) > 0:  
+        df_annot = pd.concat(parsed_df)
+        return df_annot
+    else:
+        print 'No Annotations generated, please check for excessive missing values'
+        return df_vars
 
 
 
@@ -557,7 +559,7 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
         df['multiallele'] = df.ALT.str.count(',')
         multidf = df[df['multiallele'] > 0]
             
-        while len(df) > 0 | len(multidf) > 0:
+        while len(df) + len(multidf) > 0:
             
             df = df[~df.index.isin(multidf.index)]
             #print len(multidf), 'multidf rows'
@@ -596,7 +598,9 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
             
             df.reset_index(level=4, inplace=True, drop=True)
             df.set_index('GT', inplace=True, drop=False,append=True)
+            #print df
             return df
+    
         return pd.DataFrame()
 
 
