@@ -488,11 +488,27 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
         return df_vars
 
 
+def df_split(df, split_level):
+    '''
+    Splits pandas dataframe into roughly
+    equal sizes
+    '''
+    row_count = len(df)
+    split_size = row_count / split_level
+    split_df = []
+    for n,i in enumerate(range(0, row_count, split_size)):
+        if n+1 == split_level:
+            split_df.append( df.ix[df.index[i:]] )
+            break
+        else:
+            split_df.append( df.ix[df.index[i: i+split_size]] )
+    return split_df
 
 
 def mp_variant_annotations(df_mp, df_split_cols, df_sampleid, drop_hom_ref, n_cores=1):
     pool = mp.Pool(int(n_cores))
-    tasks = np.array_split(df_mp.copy(), int(n_cores))
+    #tasks = np.array_split(df_mp.copy(), int(n_cores))  #breaks with older pandas/numpy
+    tasks = df_split( df_mp.copy(), int(n_cores) )
     tasks = [[pd.DataFrame(t), df_split_cols, df_sampleid, drop_hom_ref] for t in tasks]
     results =[]
     del df_mp
