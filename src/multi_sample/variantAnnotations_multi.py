@@ -325,7 +325,7 @@ def vartype_map(ref_alt_bases):
         #base_diff = [nt for i,nt in enumerate(ref) if ref[i] != alt[i]]
         return 'ins'
 
-    elif is_sv(ref,alt): return 'sv'
+    #elif is_sv(ref,alt): return 'sv'
 
     else: return 'indel or SV'
 
