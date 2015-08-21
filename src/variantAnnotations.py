@@ -538,13 +538,12 @@ def df_split(df, split_level):
 
 def mp_variant_annotations(df_mp, df_split_cols, df_sampleid, drop_hom_ref, n_cores=1):
     '''
-<<<<<<< HEAD:src/variantAnnotations.py
     Multiprocessing variant annotations
     
     see variantAnnotations.process_variant_annotations for description of annotations
-    '''
+    
 
-=======
+
     This function coordinates the annotation of variants using the
     multiprocessing library.
     
@@ -570,7 +569,7 @@ def mp_variant_annotations(df_mp, df_split_cols, df_sampleid, drop_hom_ref, n_co
         Number of multiprocessing jobs to start.
         Be careful as memory is copied to each process, RAM intensive
     '''
->>>>>>> f14e5af3f57c69b80f3d107c2541065c825faa7c:src/multi_sample/variantAnnotations_multi.py
+
     pool = mp.Pool(int(n_cores))
     #tasks = np.array_split(df_mp.copy(), int(n_cores))  #breaks with older pandas/numpy
     tasks = df_split( df_mp.copy(), int(n_cores) )
@@ -581,13 +580,9 @@ def mp_variant_annotations(df_mp, df_split_cols, df_sampleid, drop_hom_ref, n_co
     r = pool.map_async(process_variant_annotations, tasks, callback=results.append)
     r.wait()
     pool.close()
-<<<<<<< HEAD:src/variantAnnotations.py
     pool.join()
     pool.terminate()
     
-=======
-    #pool.join()
->>>>>>> f14e5af3f57c69b80f3d107c2541065c825faa7c:src/multi_sample/variantAnnotations_multi.py
     return pd.concat(results[0])
 
 
