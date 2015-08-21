@@ -124,8 +124,8 @@ def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
 
 def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
     '''
-    This function is 10X faster than previous iterations
-
+    This function returns the base call for each biallelic base
+        10X faster than previous iterations
     '''
     haploid_chromosomes = ['X', 'chrX', 'Y', 'chrY', 'M', 'chrM']
     
@@ -325,10 +325,9 @@ def vartype_map(ref_alt_bases):
         #base_diff = [nt for i,nt in enumerate(ref) if ref[i] != alt[i]]
         return 'ins'
 
-    elif is_sv(ref,alt): return 'sv'
+    #elif is_sv(ref,alt): return 'sv'
 
     else: return 'indel or SV'
-
 
 
 
@@ -515,6 +514,15 @@ def df_split(df, split_level):
     '''
     Splits pandas dataframe into roughly
     equal sizes
+    
+    Parameters
+    ---------------
+    df: pandas df, required
+        VCF pandas dataframe
+    
+    split_level: int, required
+        Specifies the number of chunks to split df into
+        
     '''
     row_count = len(df)
     split_size = row_count / split_level
@@ -530,11 +538,39 @@ def df_split(df, split_level):
 
 def mp_variant_annotations(df_mp, df_split_cols, df_sampleid, drop_hom_ref, n_cores=1):
     '''
+<<<<<<< HEAD:src/variantAnnotations.py
     Multiprocessing variant annotations
     
     see variantAnnotations.process_variant_annotations for description of annotations
     '''
 
+=======
+    This function coordinates the annotation of variants using the
+    multiprocessing library.
+    
+    Parameters
+    ---------------
+    df_mp: pandas df, required
+        VCF DataFrame
+        
+    df_split_cols: dict, optional
+        key:FORMAT id value:#fields expected
+        e.g. {'AD':2} indicates Allelic Depth should be
+        split into 2 columns.
+        
+    df_sampleid: list, required
+        list of sample_ids, can be 'all'
+        
+    drop_hom_ref: bool, optional
+        specifies whether to drop all homozygous reference
+        variants from dataframe.
+        FALSE REQUIRES LARGE MEMORY FOOTPRINT
+    
+    n_cores: int, optional
+        Number of multiprocessing jobs to start.
+        Be careful as memory is copied to each process, RAM intensive
+    '''
+>>>>>>> f14e5af3f57c69b80f3d107c2541065c825faa7c:src/multi_sample/variantAnnotations_multi.py
     pool = mp.Pool(int(n_cores))
     #tasks = np.array_split(df_mp.copy(), int(n_cores))  #breaks with older pandas/numpy
     tasks = df_split( df_mp.copy(), int(n_cores) )
@@ -545,12 +581,14 @@ def mp_variant_annotations(df_mp, df_split_cols, df_sampleid, drop_hom_ref, n_co
     r = pool.map_async(process_variant_annotations, tasks, callback=results.append)
     r.wait()
     pool.close()
+<<<<<<< HEAD:src/variantAnnotations.py
     pool.join()
     pool.terminate()
     
+=======
+    #pool.join()
+>>>>>>> f14e5af3f57c69b80f3d107c2541065c825faa7c:src/multi_sample/variantAnnotations_multi.py
     return pd.concat(results[0])
-
-
 
 
 def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
