@@ -9,11 +9,81 @@ from Vcf_metadata import *
 
 class Vcf(object):
     '''
-        Loads in a vcf file, aware of gzipped files.
-        testing
-        '''
+    Loads in a vcf file, aware of gzipped files.
     
-    def __init__(self, filename, sample_id='', cols=['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT'], \
+    
+    Parameters
+    --------------------------------------
+    filename: str, required
+        path to vcf file
+        
+    sample_id: str or list, default='all'
+        specifies the sample column ids to read and parse
+        
+        'all' means all sample columns
+         
+         can use a str (e.g. 'NA12878')
+         or
+         can use a list (e.g. ['NA12878', 'NA12877'] 
+        
+        
+    cols: list, default ['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT']
+        specifies the VCF column names, EXCEPT SAMPLE COLS, to read and parse
+        
+        Must include ['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT']
+        
+        Additional columns such as QUAL, FILTER, INFO will be accepted
+            e.g. ['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT', 'INFO', 'QUAL']
+    
+    chunksize: int, default=5000
+        specifies the number of VCF lines to read and parse in 1 chunk
+        
+        Note using a large chunksize with large n_cores requires LOTS OF RAM
+        
+        requires ~40 seconds to parse 1000 rows with 2500 samples
+        
+        
+    n_cores: int, default=1
+        specifies the number of cpus to use during variantAnnotation
+        
+        Note using a large chunksize with large n_cores requires LOTS OF RAM
+        
+    
+    Methods
+    -----------------------------------------
+    get_vcf_df_chunk
+        returns VCF pandasDF with chunksize
+        
+    
+    add_variant_annotations
+        Annotates each variant
+        See docstring for details
+    
+    
+    
+    Returns VCF Obj with following attributes
+    -----------------_________________________
+    header_df: pandas df
+        VCF header as a pandas df
+        
+    samples: list
+        sample column IDs
+        
+    all_columns: list
+        all sample column IDs in VCF
+        
+    vcf_chunks: pandas.io.parsers.TextFileReader chunk
+        VCF chunk
+        Access to chunk provided by get_vcf_df_chunk()
+        
+    df: pandas DF
+        Index: CHROM, POS, REF, ALT
+        Columns: CHROM, POS, REF, ALT, SAMPLE(S) +/- {QUAL, FILTER, INFO if specified}
+        
+    
+    '''
+    
+    def __init__(self, filename, sample_id='all', cols=['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT'], \
                  chunksize=5000, n_cores=1):
         
         #Header
@@ -26,7 +96,10 @@ class Vcf(object):
         if sample_id == 'all':
             self.sample_id = self.samples[:]
         else:
-            self.sample_id = [sample_id]
+            if type(sample_id) == str:
+                self.sample_id = [sample_id]
+            else:
+                self.sample_id = sample_id
         
         
         #Columns
@@ -40,6 +113,7 @@ class Vcf(object):
             self.usecols = [c for c in self.all_columns if c in cols]
             if len(sample_id) > 0:
                 self.usecols.extend(self.sample_id)
+                #print self.usecols
             else: 
                 assert False, 'no sample IDs'
         else:  #columns not specified
