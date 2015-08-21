@@ -3,6 +3,11 @@ pandasVCF
 VCF parser using the Python pandas library for interactive analysis
 
 
+<h3>Update: August 21 2015</h3>
+pandasVCF handles both multi-sample and single-sample VCF files. Please see ipynb/ for usage. pandasVCFmulti and pandasVCFsingle are now depracated.  
+
+<BR>
+
 <h3>Update: February 12 2015</h3>
 pandasVCFmulti now handles both multi-sample and single-sample VCF files. Please see http://nbviewer.ipython.org/github/erscott/pandasVCF/blob/master/ipynb/multi_sample_ex.ipynb for usage. pdVCFsingle.py is now depracated and will be removed in the near future.  
 
