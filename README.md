@@ -2,6 +2,7 @@ pandasVCF
 =========
 VCF parser using the Python pandas library for interactive analysis
 
+
 <h3>Update: March 9 2016</h3>
 VCF header parsing requires the tabix -H command which is broken in tabix version 1.2.X  Please update your tabix version to 1.3. 
 
