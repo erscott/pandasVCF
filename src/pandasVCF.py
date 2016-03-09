@@ -133,15 +133,18 @@ class Vcf(object):
         '''
             Parses header into pandas DataFrame
             '''
-        key_value_header = [i.replace('##','').replace('\n','').split('=',1) for i in header_txt if '##' in i]
-        key_value_header.append(['SampleIDs',header_txt[-1].rstrip('\n').split('\t')[9:]])
-        key_value_header.append(['ColumnHeader', header_txt[-1].rstrip('\n').split('\t')])
-        header_df =  pd.DataFrame.from_records(key_value_header)
-        header_df.set_index(0,inplace=True)
-        header_df.index.name = 'header_keys'
-        header_df.columns = ['header_values']
-        return header_df
-    
+        try:
+            key_value_header = [i.replace('##','').replace('\n','').split('=',1) for i in header_txt if '##' in i]
+            key_value_header.append(['SampleIDs',header_txt[-1].rstrip('\n').split('\t')[9:]])
+            key_value_header.append(['ColumnHeader', header_txt[-1].rstrip('\n').split('\t')])
+            header_df =  pd.DataFrame.from_records(key_value_header)
+            header_df.set_index(0,inplace=True)
+            header_df.index.name = 'header_keys'
+            header_df.columns = ['header_values']
+            return header_df
+        except IndexError:
+            print "VCF header parsing failed, this may be due to the use of tabix version 1.2.x, please upgrade to tabix 1.3 or greater"
+            return
     
     def get_vcf_df_chunk(self):
         '''
