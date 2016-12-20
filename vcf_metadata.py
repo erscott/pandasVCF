@@ -1,13 +1,11 @@
 import os
 
 
-class Vcf_metadata(object):
+class VCFMetadata(object):
+    """This class parses a VCF header into a pandas dataframe object.
 
-    """
-    This class parses a VCF header into a pandas
-    dataframe object.  It recognizes gzip and uncompressed
-    file formats.  This function assumes the header does not
-    extent past 5000 lines
+    It recognizes gzip and uncompressed file formats.
+    This function assumes the header does not extent past 5000 lines.
     """
 
     def __init__(self, filename):

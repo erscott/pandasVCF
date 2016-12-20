@@ -1,12 +1,11 @@
 import pandas as pd
 
-from variantAnnotations import process_variant_annotations, mp_variant_annotations
-from Vcf_metadata import Vcf_metadata
+from variant_annotations import process_variant_annotations, mp_variant_annotations
+from vcf_metadata import VCFMetadata
 
 
-class Vcf(object):
-    """
-    Loads in a vcf file, aware of gzipped files.
+class VCF(object):
+    """Loads in a vcf file, aware of gzipped files.
 
 
     Parameters
@@ -85,7 +84,7 @@ class Vcf(object):
                  chunksize=5000, n_cores=1):
 
         # Header
-        header_parsed = Vcf_metadata(filename)
+        header_parsed = VCFMetadata(filename)
         # header parsed into key/values dataframe
         self.header_df = self.get_header_df(header_parsed.header)
 
@@ -189,7 +188,7 @@ class Vcf(object):
         inplace: bool, default=False
         This will replace the sample_id column with parsed columns,
         and drop the FORMAT field.  If True, this will create an
-        additional dataframe, df_annot, to the Vcf object composed of
+        additional dataframe, df_annot, to the VCF object composed of
         the parsed columns (memory intensive)
 
 
