@@ -649,13 +649,12 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
     multidf = df[df['multiallele'] > 0]
 
     while len(df) + len(multidf) > 0:
-
-        df = df[~df.index.isin(multidf.index)]
-        # print len(multidf), 'multidf rows'
-
+    
         if len(multidf) > 0:
-            multidf = get_multiallelic_bases(
-                multidf, sample_name, single_sample_vcf=False)
+            df = df[~df.index.isin(multidf.index)]
+            multidf = get_multiallelic_bases(multidf,
+                                             sample_name,
+                                             single_sample_vcf=False)
 
         # print 'single alleles', len(df)
 
