@@ -181,7 +181,7 @@ def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
         haploid_df['phase'] = '-'
         haploid_df = haploid_df[haploid_df['CHROM'].isin(haploid_chromosomes)]
 
-        df = df[~df.index.isin(haploid_df.index)]
+        df.drop(haploid_df.index, inplace=True)
         df['phase'] = df[sample_col].str[1]
         df = df[(df['phase'] != '-')]
 
@@ -261,8 +261,8 @@ def zygosity_fast(df):
     df_het_miss = df[(df['a1'] == '.') | (df['a2'] == '.')]
     df_het_miss['zygosity'] = 'het-miss'
 
-    df_not_miss = df[~df.index.isin(set(df_hom_miss.index) |
-                                    set(df_het_miss.index))]
+    df_not_miss = df.drop(set(df_hom_miss.index) |
+                              set(df_het_miss.index))
 
     df_het_alt = df_not_miss[((df_not_miss['a1'] != df_not_miss['REF']) &
                               (df_not_miss['a2'] != df_not_miss['REF'])) &
