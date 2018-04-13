@@ -20,6 +20,6 @@ class VCFMetadata(object):
             self.header = [l for l in header_lines if l.startswith('#')]
 
         else:
-            self.compression = ''
+            self.compression = 'infer'
             header_lines = os.popen('head -5000 ' + filename).readlines()
             self.header = [l for l in header_lines if l.startswith('#')]

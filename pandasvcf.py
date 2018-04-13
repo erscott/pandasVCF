@@ -140,7 +140,9 @@ class VCF(object):
             header_df.columns = ['header_values']
             return header_df
         except IndexError:
-            print "VCF header parsing failed, this may be due to the use of tabix version 1.2.x, please upgrade to tabix 1.3 or greater"
+            print("VCF header parsing failed, "
+                  "this may be due to the use of "
+                  "tabix version 1.2.x, please upgrade to tabix 1.3 or greater")
             return
 
     def get_vcf_df_chunk(self):
@@ -153,7 +155,7 @@ class VCF(object):
             self.stopIteration = False
         except StopIteration:
             self.stopIteration = True
-            print 'End of File Reached'
+            print("End of File Reached")
             # self.df = None
             return 1
         self.df.drop_duplicates(inplace=True)  # dropping duplicate rows
@@ -218,7 +220,7 @@ class VCF(object):
         """
 
         if self.stopIteration:
-            print 'End of File Reached'
+            print('End of File Reached')
             return 1
 
         self.drop_hom_ref = drop_hom_ref
@@ -253,7 +255,7 @@ class VCF(object):
 
 
 #        if set(self.sample_id) - set(self.df.columns) > 0:
-#            print 'Sample genotype column not found, add_variant_annotations can only be called if the FORMAT and sample genotype columns are available?'
+#            print('Sample genotype column not found, 'add_variant_annotations can only be called if the FORMAT and sample genotype columns are available?'
 #            return 1
 #
 #        if verbose:
