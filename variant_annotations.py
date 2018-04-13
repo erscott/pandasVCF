@@ -514,7 +514,7 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
         df_annot.reset_index('sample_ids', drop=False, inplace=True)
         return df_annot
     else:
-        print 'No Annotations generated, please check for excessive missing values'
+        print('No Annotations generated, please check for excessive missing values')
         return df_vars
 
 
