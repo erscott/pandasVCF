@@ -218,7 +218,7 @@ def parse_single_genotype_data(df, sample_id, split_cols=''):
     return sample_df
 
 
-<<<<<<< HEAD
+
 def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
     """
     This function stacks a pandas vcf dataframe and adds annotations for
@@ -358,8 +358,6 @@ def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
         return df_vars
 
 
-=======
->>>>>>> pd_categoricals
 def df_split(df, split_level):
     """
     Splits pandas dataframe into roughly
