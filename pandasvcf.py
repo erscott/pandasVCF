@@ -39,12 +39,6 @@ class VCF(object):
         requires ~40 seconds to parse 1000 rows with 2500 samples
 
 
-    n_cores: int, default=1
-        specifies the number of cpus to use during variantAnnotation
-
-        Note using a large chunksize with large n_cores requires LOTS OF RAM
-
-
     Methods
     -----------------------------------------
     get_vcf_df_chunk
@@ -81,49 +75,29 @@ class VCF(object):
 
     def __init__(self, filename, sample_id='all',
                  cols=['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT'],
-                 chunksize=5000, n_cores=1):
+                 chunksize=5000):
 
         # Header
         header_parsed = VCFMetadata(filename)
         # header parsed into key/values dataframe
         self.header_df = self.get_header_df(header_parsed.header)
-
         # Sample IDs
         self.samples = list(self.header_df.ix['SampleIDs'])[0]
-        if sample_id == 'all':
-            self.sample_id = self.samples[:]
-        else:
-            if type(sample_id) == str:
-                self.sample_id = [sample_id]
-            else:
-                self.sample_id = sample_id
+        self.sample_id = self.get_sample_ids(sample_id)
 
-        # Columns
-        self.all_columns = list(self.header_df.ix['ColumnHeader'])[0]
-        self.FORMAT = self.all_columns[8]
+        self.set_cols(cols)
 
-        assert len(set(cols) & set(['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT'])) > 4, "cols requires the following columns: ['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT']"
-        self.cols = cols
-        if len(cols) > 0:  # columns specified
-            self.usecols = [c for c in self.all_columns if c in cols]
-            if len(sample_id) > 0:
-                self.usecols.extend(self.sample_id)
-                # print self.usecols
-            else:
-                assert False, 'no sample IDs'
-        else:  # columns not specified
-            self.usecols = [s for s in self.cols if s not in self.samples]
-            self.usecols.extend(self.sample_id)
-
+        self.set_dtypes()
+        
         # Open pandas chunk object (TextReader)
         self.chunksize = chunksize
-        self.vcf_chunks = pd.read_table(filename, sep="\t",
+        self.vcf_chunks = pd.read_csv(filename, sep="\t",
                                         compression=header_parsed.compression,
                                         skiprows=(len(self.header_df) - 2),
                                         usecols=self.usecols,
-                                        chunksize=chunksize)
+                                        chunksize=chunksize,
+                                        dtype=self.vcf_dtypes)
 
-        self.n_cores = n_cores
 
     def get_header_df(self, header_txt):
         """Parses header into pandas DataFrame"""
@@ -145,6 +119,46 @@ class VCF(object):
                   "tabix version 1.2.x, please upgrade to tabix 1.3 or greater")
             return
 
+    def get_sample_ids(self, sample_id):
+        """
+        Identifies and stores sample_id(s)
+        """
+        if sample_id == 'all':
+            return self.samples[:]
+        else:
+            if type(sample_id) == str:
+                return [sample_id]
+            else:
+                return sample_id
+
+    def set_cols(self, cols):
+        # Columns
+        self.all_columns = list(self.header_df.ix['ColumnHeader'])[0]
+        self.FORMAT = self.all_columns[8]
+
+        assert len(set(cols) & set(['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT'])) > 4, "cols requires the following columns: ['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT']"
+        self.cols = cols
+        if len(cols) > 0:  # columns specified
+            self.usecols = [c for c in self.all_columns if c in cols]
+
+            if len(self.sample_id) > 0:
+                self.usecols.extend(self.sample_id)
+                # print self.usecols
+            else:
+                assert False, 'no sample IDs'
+        else:  # columns not specified
+            self.usecols = [s for s in self.cols if s not in self.samples]
+            self.usecols.extend(self.sample_id)
+
+    def set_dtypes(self):
+        self.vcf_dtypes = {'CHROM':'category',
+                           'POS':'int32',
+                           'REF':'category',
+                           'ALT':'category',
+                           'FORMAT':'category',
+                           'QUAL':'int8',
+                           'FILTER':'category'}
+
     def get_vcf_df_chunk(self):
         """
         This function iterates through the VCF files using the user-defined
@@ -160,7 +174,7 @@ class VCF(object):
             return 1
         self.df.drop_duplicates(inplace=True)  # dropping duplicate rows
         self.df.columns = [c.replace('#', '') for c in self.usecols]
-        self.df['CHROM'] = self.df['CHROM'].astype(str).str.replace('chr', '')
+        self.df['CHROM'] = self.df['CHROM'].astype(str).str.replace('chr', '').astype('category')
         self.df.set_index(
             ['CHROM', 'POS', 'REF', 'ALT'], inplace=True, drop=False)
 
@@ -170,7 +184,8 @@ class VCF(object):
         return 0
 
     def add_variant_annotations(self, split_columns='', verbose=False,
-                                inplace=False, drop_hom_ref=True):
+                                inplace=False, drop_hom_ref=True,
+                                n_cores=1):
         """
         This function adds the following annotations for each variant:
         multiallele, phase, a1, a2, GT1, GT2, vartype1, vartype2, zygosity,
@@ -180,19 +195,29 @@ class VCF(object):
         --------------
 
         split_columns: dict, optional
-        key:FORMAT id value:#fields expected
-        e.g. {'AD':2} indicates Allelic Depth should be
-        split into 2 columns.
+            key:FORMAT id value:#fields expected
+            e.g. {'AD':2} indicates Allelic Depth should be
+            split into 2 columns.
+
+        drop_hom_ref: bool, default=True
+            This will drop homozygous reference genotype calls from
+            the long dataframe.  As most calls in a multisample vcf
+            are homozygous reference, this will reduce memory requirements
+            dramatically.
 
         verbose: bool, default=False
-        This will describe how many missing variants were dropped
+            This will describe how many missing variants were dropped
 
         inplace: bool, default=False
-        This will replace the sample_id column with parsed columns,
-        and drop the FORMAT field.  If True, this will create an
-        additional dataframe, df_annot, to the VCF object composed of
-        the parsed columns (memory intensive)
+            This will replace the sample_id column with parsed columns,
+            and drop the FORMAT field.  If True, this will create an
+            additional dataframe, df_annot, to the VCF object composed of
+            the parsed columns (memory intensive)
 
+        n_cores: int, default=1
+            specifies the number of cpus to use during variantAnnotation
+
+            Note using a large chunksize with large n_cores requires LOTS OF RAM
 
         Output
         --------------
@@ -229,57 +254,43 @@ class VCF(object):
                                    - {'CHROM', 'POS', 'REF', 'ALT', 'FORMAT'}
                                    - set(self.sample_id))]
 
-        if self.n_cores == 1:
+        self.df = self.df.reset_index(drop=True)
+
+        if n_cores==1:
             if inplace:
-                self.df = process_variant_annotations([self.df,
-                                                       split_columns,
-                                                       self.sample_id,
-                                                       self.drop_hom_ref])
+                self.df = process_variant_annotations(self.df,
+                                                       split_columns=split_columns,
+                                                       sample_id=self.sample_id,
+                                                       drop_hom_ref=drop_hom_ref)
                 # joining QUAL, FILTER, and/or INFO columns
-                self.df = self.df.join(df_vcf_cols)
             else:
-                self.df_annot = process_variant_annotations([self.df,
-                                                             split_columns,
-                                                             self.sample_id,
-                                                             self.drop_hom_ref])
+                self.df_annot = process_variant_annotations(self.df,
+                                                             split_columns=split_columns,
+                                                             sample_id=self.sample_id,
+                                                             drop_hom_ref=drop_hom_ref)
         else:
-            var_annot = mp_variant_annotations(self.df.copy(),
-                                               split_columns, self.sample_id,
-                                               self.drop_hom_ref, self.n_cores)
             if inplace:
-                # joining QUAL, FILTER, and/or INFO columns
-                self.df = var_annot.join(df_vcf_cols)
+                self.df = mp_variant_annotations(self.df, 
+                                                 n_cores=n_cores,
+                                                 df_split_cols=split_columns,
+                                                 df_sampleid=self.sample_id,
+                                                 drop_hom_ref=sdrop_hom_ref)
             else:
-                self.df_annot = var_annot
+                self.df_annot = mp_variant_annotations(self.df, 
+                                                 n_cores=n_cores,
+                                                 df_split_cols=split_columns,
+                                                 df_sampleid=self.sample_id,
+                                                 drop_hom_ref=drop_hom_ref)
+        if inplace:
+            self.df = self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'])
+        else:
+            self.df_annot = self.df_annot.set_index(['CHROM', 'POS', 'REF', 'ALT'])
         return 0
 
 
-#        if set(self.sample_id) - set(self.df.columns) > 0:
-#            print('Sample genotype column not found, 'add_variant_annotations can only be called if the FORMAT and sample genotype columns are available?'
-#            return 1
-#
-#        if verbose:
-#            print 'input variant rows:', len(self.df)
-#
-#        self.df.drop_duplicates(inplace=True)
-#
-#        var_counts = len(self.df)
-#
-#        self.df = self.df[self.df[self.sample_id]!='.']  #dropping missing genotype calls
-#
-#        if verbose:
-#
-#            print 'dropping',var_counts - len(self.df), 'variants with genotype call == "." '
-#            print 'current variant rows:', len(self.df)
-#
-#
-#        if inplace:
-#            if 'POS' not in self.df.columns:
-#                self.df.reset_index(inplace=True)
-#                self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'],inplace=True, drop=False)
-#            self.df = get_vcf_annotations(self.df, self.sample_id, split_columns)
-#        else:
-#            self.df_annot = get_vcf_annotations(self.df, self.sample_id, split_columns)
-#            self.df.set_index(['CHROM', 'POS', 'REF', 'ALT'],inplace=True)
-#
-#        return 0
+
+
+
+
+
+
