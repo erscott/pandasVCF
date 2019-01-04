@@ -6,244 +6,59 @@ VCF DNA variant
 
 import pandas as pd
 import numpy as np
+from functools import partial
 import multiprocessing as mp
 import gc
 
 
-def get_multiallelic_bases(df_orig, sample_col, single_sample_vcf=True):
-    """
-    This function parses multiallele variants into DNA base representations.
-    It currently does not support haploid chromosomes.
-    """
 
-    haploid_chromosomes = ['X', 'chrX', 'Y', 'chrY', 'M', 'chrM']
-
-    df = df_orig.copy()
-
-    def get_phase(line, sample_id):
-        """Returns phase from genotype"""
-        genotype = str(line[sample_id])
-        if "|" in genotype:
-            return "|"
-        if "/" in genotype:
-            return "/"
-        else:
-            return '-'
-
-    def _get_allele(line, gt_col):
-        """Returns allele base call from multi-allelic variants"""
-
-        alleles = [line['REF']]
-        alleles.extend(list(line['ALT'].split(",")))
-        a1 = "."
-        try:
-            # returns missing if gt_int_call is "."
-            a1 = alleles[int(line[gt_col])]
-        except:
-            a1 = "."
-        return a1
-
-    def get_GT_multisample_vcf(line, sample_col, gt_index):
-        return line[sample_col].split(':')[0].split(line['phase'])[int(gt_index)]
-
-    def get_GT_multisample_vcf_haploid(line, sample_col, gt_index):
-        return str(line[sample_col]).split(':')[0]
-
-
-#    if single_sample_vcf:
-#        df['phase'] = df[sample_col].str[1]
-#        df = df[df['phase']!=':']  #removing haploid variants
-#
-#        df['GT1'] = df[sample_col].str[0]
-#        df = df[df['GT1']!='.']  #removing variants with missing calls
-#        df['GT1'] = df['GT1'].astype(int)
-#
-#        df['GT2'] = df[sample_col].str[2]
-#        df = df[df['GT2']!='.']  #removing variants with missing calls
-#        df['GT2'] = df['GT2'].astype(int)
-
-    if not single_sample_vcf:
-        df['phase'] = df.apply(
-            get_phase, args=[sample_col], axis=1)  # get phase
-        # likley occurs at sex chromosome sites
-        haploid_df = df[df.phase == "-"]
-        haploid_df = haploid_df[haploid_df['CHROM'].isin(haploid_chromosomes)]
-
-        if len(haploid_df) > 0:
-            haploid_df['GT1'] = df.apply(get_GT_multisample_vcf_haploid,
-                                         args=[sample_col, 0], axis=1)
-            haploid_df = haploid_df[(haploid_df['GT1'] != '.') &
-                                    (haploid_df['GT1'] != np.NaN)]
-            haploid_df['GT1'] = haploid_df['GT1'].astype(int)
-            haploid_df['GT2'] = 0
-            haploid_df['a1'] = haploid_df.apply(_get_allele,
-                                                args=['GT1'], axis=1)
-            haploid_df['a2'] = haploid_df.apply(_get_allele,
-                                                args=['GT2'], axis=1)
-        df = df[df.phase != "-"]
-        if len(df) > 0:
-            df['GT1'] = df.apply(get_GT_multisample_vcf,
-                                 args=[sample_col, 0], axis=1)
-            df = df[(df['GT1'] != '.') & (df['GT1'] != np.NaN)]
-            df['GT1'] = df['GT1'].astype(int)
-
-            df['GT2'] = df.apply(get_GT_multisample_vcf,
-                                 args=[sample_col, 1], axis=1)
-            df = df[(df['GT2'] != '.') & (df['GT2'] != np.NaN)]
-            df['GT2'] = df['GT2'].astype(int)
-            df['a1'] = df.apply(_get_allele, args=['GT1'], axis=1)
-            df['a2'] = df.apply(_get_allele, args=['GT2'], axis=1)
-
-    # if len(df_multi) > 0:
-    #    df = df.append(df_multi)
-
-    # df['a1'] = df.apply(_get_allele, args=['GT1'], axis=1)
-    # df['a2'] = df.apply(_get_allele, args=['GT2'], axis=1)
-
-    if len(df) > 0:
-        if len(haploid_df) > 0:
-            df = df.append(haploid_df)  # adding haploid variants to dataframe
-            return df
-        else:
-            return df
-    if len(haploid_df) > 0:
-        return haploid_df
-    else:
-        return pd.DataFrame()
-
-
-def get_biallelic_bases(df, sample_col, single_sample_vcf=True):
+def add_allelic_bases(df, sample_col, single_sample_vcf=True):
     """This function returns the base call for each biallelic base
     10X faster than previous iterations
     """
     haploid_chromosomes = ['X', 'chrX', 'Y', 'chrY', 'M', 'chrM']
 
-    def get_phase(line, sample_id):
-        """Returns phase from genotype"""
-        genotype = str(line[sample_id])
-        if "|" in genotype:
-            return "|"
-        if "/" in genotype:
-            return "/"
-        else:
-            return '-'
+    def vector_GT_alleles(ref_alt_gt):
+        '''Retrieve GT1, GT2, a1, a2'''
+        
+        def get_phase(genotype):
+            """Returns phase from genotype"""
+            if "|" in genotype:
+                return "|"
+            if "/" in genotype:
+                return "/"
+            else:
+                return '-'
+        
+        REF, ALT, GT = ref_alt_gt
+        phase = get_phase(GT)
+        bases = [REF] + str(ALT).split(',')
+        gt1, gt2 = np.NaN, np.NaN
+        a1, a2 = '.', '.'
+        GT = str(GT).split(phase)
+        
+        if len(GT) == 2:  #Diploid
+            gt1, gt2 = GT
 
-    def _get_allele(line, gt_col):
-        """Returns allelic base, handles multi-allelic variants"""
-        alleles = [line['REF']]
-        alleles.extend(line['ALT'].split(","))
-        a1 = "."
-        try:
-            # returns missing if gt_int_call is "."
-            a1 = alleles[int(line[gt_col])]
-        except:
-            a1 = "."
-        return a1
+            if gt1 == ".":
+                a1 = "."
+            else:
+                a1 = bases[int(gt1)]
 
-    def get_GT_multisample_vcf(line, sample_col, gt_index):
-        return int(line[sample_col].split(line['phase'])[int(gt_index)])
+            if gt2 == ".":
+                a2 = "."
+            else:
+                a2 = bases[int(gt2)]
+        
+        if len(GT) == 1:  #Haploid
+            gt1 = GT[0]
+            a1 = bases[int(gt1)]
+            
+        return (gt1, gt2, a1, a2, phase)
 
-    def get_GT_multisample_vcf_haploid(line, sample_col, gt_index):
-        return str(line[sample_col]).split(':')[0]
-
-    if single_sample_vcf:
-        df['GT_len'] = df[sample_col].str.split(':').str[0].str.len()
-        haploid_df = df[df['GT_len'] <= 1]
-        haploid_df['phase'] = '-'
-        haploid_df = haploid_df[haploid_df['CHROM'].isin(haploid_chromosomes)]
-
-        df = df[df['GT_len'] > 1]
-        df['phase'] = df[sample_col].str[1]
-        df = df[(df['phase'] != '-')]
-
-        del df['GT_len']
-        del haploid_df['GT_len']
-
-        if len(haploid_df) > 0:
-            haploid_df['GT1'] = haploid_df[sample_col].str[0]
-            haploid_df = haploid_df[(haploid_df['GT1'] != '.') &
-                                    (haploid_df['GT1'] != np.NaN)]
-            haploid_df['GT2'] = 0
-
-        if len(df) > 0:
-            df['GT1'] = df[sample_col].str[0]
-            df = df[(df['GT1'] != '.') & (df['GT1'] != np.NaN)]
-            df['GT1'] = df['GT1'].astype(int)
-            df['GT2'] = df[sample_col].str[2]
-            df = df[(df['GT2'] != '.') & (df['GT2'] != np.NaN)]
-            df['GT2'] = df['GT2'].astype(int)
-
-    # 16th December 2014 not sure this is needed now that
-    # get_multiallelic_bases is separate function
-    if not single_sample_vcf:
-        df['GT_len'] = df[sample_col].str.split(':').str[0].str.len()
-        haploid_df = df[df['GT_len'] <= 1]
-        haploid_df['phase'] = '-'
-        haploid_df = haploid_df[haploid_df['CHROM'].isin(haploid_chromosomes)]
-
-        df.drop(haploid_df.index, inplace=True)
-        df['phase'] = df[sample_col].str[1]
-        df = df[(df['phase'] != '-')]
-
-        del df['GT_len']
-        del haploid_df['GT_len']
-
-        if len(df) > 0:
-            df['GT1'] = df.apply(get_GT_multisample,
-                                 args=[sample_col, 0], axis=1)
-            df = df[(df['GT1'] != '.') & (df['GT1'] != np.NaN)]
-            df['GT2'] = df.apply(get_GT_multisample,
-                                 args=[sample_col, 1], axis=1)
-            df = df[(df['GT2'] != '.') & (df['GT2'] != np.NaN)]
-
-        if len(haploid_df) > 0:
-            haploid_df['GT1'] = df.apply(get_GT_multisample_vcf_haploid,
-                                         args=[sample_col, 0], axis=1)
-            haploid_df = haploid_df[(haploid_df['GT1'] != '.') & (haploid_df['GT1'] != np.NaN)]
-            haploid_df['GT1'] = haploid_df['GT1'].astype(int)
-            haploid_df['GT2'] = 0
-
-    if len(df) > 0:
-        if len(haploid_df) > 0:
-            df = df.append(haploid_df)
-        else:
-            pass
-    else:
-        df = haploid_df
-
-    # FAST PROCESS SIMPLE ALLELE GENOTYPES
-    df_simple = df
-    if len(df_simple) > 0:
-        # get a1 ref alleles
-        df_gt1_ref = df_simple[df_simple.GT1.astype(int) == 0][['REF']]
-        df_gt1_ref.columns = ['a1']
-        # get a2 ref alleles
-        df_gt2_ref = df_simple[df_simple.GT2.astype(int) == 0][['REF']]
-        df_gt2_ref.columns = ['a2']
-
-        # get a1 alt alleles
-        df_gt1_alt = df_simple[df_simple.GT1.astype(int) == 1][['ALT']]
-        df_gt1_alt.columns = ['a1']
-        # get a2 alt alleles
-        df_gt2_alt = df_simple[df_simple.GT2.astype(int) == 1][['ALT']]
-        df_gt2_alt.columns = ['a2']
-
-        # merging GT1 allele bases into a single df
-        gt1_alleles = pd.concat([df_gt1_ref, df_gt1_alt])
-        # del gt1_alleles[0]
-        # merging GT2 allele bases into a single df
-        gt2_alleles = pd.concat([df_gt2_ref, df_gt2_alt])
-        # del gt2_alleles[0]
-        # Joining the GT1 and GT2 simple allele bases
-        gt1_2_allele_df = gt1_alleles.join(gt2_alleles)
-
-        # print len(df)
-
-        return df.join(gt1_2_allele_df)
-
-    else:
-        return pd.DataFrame()
-    # print len(df)
+    df = df.assign(**{'GT1':-1, 'GT2':-1, 'a1':'', 'a2':'', 'phase':''})
+    df.loc[:, ['GT1', 'GT2', 'a1', 'a2', 'phase']] = [i for i in map(vector_GT_alleles, df[['REF','ALT', sample_col]].values)]
+    return df
 
 
 def zygosity_fast(df):
@@ -252,37 +67,59 @@ def zygosity_fast(df):
     each variant using set logic
     """
 
-    df_hom_ref = df[(df['a1'] == df['REF']) & (df['a2'] == df['REF'])]
-    df_hom_ref['zygosity'] = 'hom-ref'
+    def check_empty_df(df, zygosity):
 
-    df_hom_miss = df[(df['a1'] == '.') & (df['a2'] == '.')]
-    df_hom_miss['zygosity'] = 'hom-miss'
+        try:
+            df.loc[:, 'zygosity'] = zygosity
+            return df
+        except ValueError:
+            if len(df) == 0:
+                return pd.DataFrame()
+            else:
+                assert False
 
-    df_het_miss = df[(df['a1'] == '.') | (df['a2'] == '.')]
-    df_het_miss['zygosity'] = 'het-miss'
+    
+    df_hom_ref = df[(df['a1'] == df['REF']) & (df['a2'] == df['REF'])].copy()
+    df_hom_ref.loc[:, 'zygosity'] = 'hom-ref'
+
+    df_hom_miss = df[(df['a1'] == '.') & (df['a2'] == '.')].copy()
+    if len(df_hom_miss) > 0:
+        df_hom_miss = check_empty_df(df_hom_miss, 'hom-miss')
+        #df_hom_miss.loc[:, 'zygosity'] = 'hom-miss'
+
+    df_het_miss = df[(df['a1'] == '.') | (df['a2'] == '.')].copy()
+    if len(df_het_miss) > 0:
+        df_het_miss = check_empty_df(df_het_miss, 'het-miss')
+        #df_het_miss.loc[:, 'zygosity'] = 'het-miss'
 
     df_not_miss = df.drop(set(df_hom_miss.index) |
-                              set(df_het_miss.index))
+                              set(df_het_miss.index)).copy()
 
     df_het_alt = df_not_miss[((df_not_miss['a1'] != df_not_miss['REF']) &
                               (df_not_miss['a2'] != df_not_miss['REF'])) &
-                             (df_not_miss['a1'] != df_not_miss['a2'])]
-    df_het_alt['zygosity'] = 'het-alt'
+                             (df_not_miss['a1'] != df_not_miss['a2'])].copy()
+    df_het_alt = check_empty_df(df_het_alt, 'het-alt')
+    #df_het_alt.loc[:, 'zygosity'] = 'het-alt'
 
     df_hom_alt = df_not_miss[(((df_not_miss['a1'] != df_not_miss['REF']) &
                                (df_not_miss['a2'] != df_not_miss['REF']))) &
-                             (df_not_miss['a1'] == df_not_miss['a2'])]
-    df_hom_alt['zygosity'] = 'hom-alt'
+                             (df_not_miss['a1'] == df_not_miss['a2'])].copy()
+    df_hom_alt = check_empty_df(df_hom_alt, 'hom-alt')
+    #df_hom_alt.loc[:, 'zygosity'] = 'hom-alt'
 
     df_het_ref = df_not_miss[((df_not_miss['a1'] == df_not_miss['REF']) &
                               (df_not_miss['a2'] != df_not_miss['REF'])) |
                              ((df_not_miss['a1'] != df_not_miss['REF']) &
-                              (df_not_miss['a2'] == df_not_miss['REF']))]
-    df_het_ref['zygosity'] = 'het-ref'
+                              (df_not_miss['a2'] == df_not_miss['REF']))].copy()
+    df_het_ref = check_empty_df(df_het_ref, 'het-ref')
+    #df_het_ref.loc[:, 'zygosity'] = 'het-ref'
 
     df_zygosity = pd.concat([df_hom_ref, df_hom_miss,
                              df_het_miss, df_het_ref,
-                             df_het_alt, df_hom_alt])
+                             df_het_alt, df_hom_alt],
+                             sort=True)
+
+    df_zygosity.loc[:, 'zygosity'] = df_zygosity['zygosity'].astype('category')
     # return df_zygosity
     assert len(df_zygosity) == len(df)
     return df_zygosity
@@ -293,7 +130,7 @@ def vartype_map(ref_alt_bases):
     This function assigns the following vartypes to the
     allele specified by allele_base_col: snp, mnp, ins, del, indel or SV
     """
-    ref, alt = ref_alt_bases
+    ref, alt = str(ref_alt_bases[0]), str(ref_alt_bases[-1])
     len_diff = len(ref) - len(alt)
 
     if ref == alt:
@@ -332,9 +169,11 @@ def get_hom_ref_counts(df):
     Also assumes the homozygous reference values are ascribed:
         0|0 , 0/0 , 0
     """
-    hom_ref = df[df['GT'].isin(['0|0', '0/0', '0'])]
-    hom_ref['hom_ref'] = 1
-    return hom_ref.groupby(level=[0, 1, 2, 3])['hom_ref'].aggregate(np.sum)
+
+    hom_ref = df.groupby(['CHROM', 'POS', 'REF', 'ALT'])['zygosity'].value_counts().xs('hom-ref',level=4)
+    hom_ref = pd.DataFrame(hom_ref).reset_index()
+    hom_ref = hom_ref.rename(columns={'zygosity':'hom_ref_counts'})
+    return hom_ref.reset_index()
 
 
 def parse_single_genotype_data(df, sample_id, split_cols=''):
@@ -356,13 +195,13 @@ def parse_single_genotype_data(df, sample_id, split_cols=''):
         # del temp_group['FORMAT']  #remove the format column
         # replace . with none, allows stack to remove null columns, space
         # savings
-        temp_group.replace(to_replace='.', value='', inplace=True)
+        temp_group = temp_group.replace(to_replace='.', value='')
 
         temp_group_data = pd.DataFrame.from_records(
             list(temp_group.str.split(':')))
         temp_group_data.index = temp_group.index
         temp_group_data.columns = name.split(':')
-        temp_group_data.replace(to_replace='.', value='', inplace=True)
+        temp_group_data = temp_group_data.replace(to_replace='.', value='')
 
         master_df.append(temp_group_data)
 
@@ -377,145 +216,6 @@ def parse_single_genotype_data(df, sample_id, split_cols=''):
                 sample_df[col + '_' + str(i)] = sample_df[col].str.split(',').str[i]
             del sample_df[col]
     return sample_df
-
-
-def process_variant_annotations(df_vars_split_cols_sample_id_drop_hom_ref):
-    """
-    This function stacks a pandas vcf dataframe and adds annotations for
-    each genotype
-
-    This function adds the following annotations to each variant:
-
-        multiallele: {0,1} 0=biallele  1=multiallelic
-
-        phase: {'/', '|'} /=unphased, |=phased
-
-        a1: DNA base representation of allele1 call, e.g. A
-        a2: DNA base representation of allele2 call, e.g. A
-
-        GT1: numeric representation of allele1 call, e.g. 0
-        GT2: numeric representation of allele2 call, e.g. 1
-
-        vartype1: {snp, mnp, ins, del, indel or SV} variant type of first allele
-        vartype2: {snp, mnp, ins, del, indel or SV} variant type of second allele
-
-        zygosity: {het-ref, hom-ref, alt-ref, het-miss, hom-miss}
-
-        FORMAT values: any values associated with the genotype calls are
-        added as additional columns, split_columns are further
-        split by ',' into individual columns
-    """
-    df_vars, split_columns, sample_id, drop_hom_ref = df_vars_split_cols_sample_id_drop_hom_ref
-
-    df_groups = df_vars.groupby('FORMAT')
-
-    parsed_df = []
-    # iterate through different FORMAT types
-    for format, df_format in df_groups:
-
-        # dropping missing ALT alleles
-        df_format = df_format[df_format['ALT'] != '.']
-        df_format = df_format[sample_id]  # only consider sample columns
-        # replacing missing calls with None
-        df_format = df_format.replace(to_replace='.', value=np.NaN)
-
-        # stacks sample calls and drops none calls
-        df_format = pd.DataFrame(
-            df_format.stack(), columns=['sample_genotypes'])
-
-        if len(df_format) < 1:  # occurs when all calls are empty
-            continue
-
-        # SAVE QUALITY INFORMATION SEPARETELY TO AVOID ANNOTATION PROCESSING
-        # IDENTICAL GENOTYPE CALLS (DIFFERENT QUALITY DOESNT MATTER)
-        if format.count(':') > 0:
-            # qual df, setting aside for later joining
-            df_qual = pd.DataFrame(list(df_format['sample_genotypes'].str.split(':')),
-                                   index=df_format.index)
-            # print df_format.head(), format.split(':')
-            df_qual.columns = format.split(':')  # setting quality column names
-            # setting index names for joining with df_format later
-            df_qual.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']
-            # setting just the GT calls
-            df_format['sample_genotypes'] = df_qual[format.split(':')[0]]
-            # removing from df_qual to avoid joining problems with df_format
-            # after add_annotations
-            del df_qual['GT']
-
-        # DROPPING MISSING CALLS
-        df_format = df_format[(df_format['sample_genotypes'] != './.') &
-                              (df_format['sample_genotypes'] != '.|.') &
-                              (df_format['sample_genotypes'] != '.')]
-
-        # SETTING INDICES
-        # setting index names
-        df_format.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']
-        df_format.reset_index(inplace=True)
-
-        # ONLY NEED TO PASS UNIQUE GENOTYPE CALLS DF TO get_vcf_annotations,
-        # then broadcast back to df_format
-        df_annotations = df_format.drop_duplicates(subset=['CHROM', 'POS',
-                                                           'REF', 'ALT',
-                                                           'sample_genotypes'])
-        df_annotations['FORMAT'] = format.split(':')[0]  # setting format id
-        df_annotations.set_index(['CHROM', 'POS', 'REF',
-                                  'ALT', 'sample_genotypes'],
-                                 drop=False, inplace=True)
-        # getting annotations
-        df_annotations = get_vcf_annotations(df_annotations,
-                                             'sample_genotypes',
-                                             split_columns=split_columns)
-
-        # SETTING INDICES AGAIN
-        if len(df_annotations) < 1:
-            continue  # continue if no variants within this FORMAT category
-        df_format.set_index(['CHROM', 'POS', 'REF',
-                             'ALT', 'sample_genotypes'],
-                            drop=True, inplace=True)
-        df_annotations.index.names = ['CHROM', 'POS', 'REF',
-                                      'ALT', 'sample_genotypes']
-        df_format = df_format.join(df_annotations)
-
-        # df_format.set_index('sample_ids', drop=True, inplace=True, append=True)
-        df_format['FORMAT'] = format
-        df_format.reset_index(level=4, inplace=True, drop=False)
-
-        if drop_hom_ref:
-            hom_ref_counts = get_hom_ref_counts(df_format)
-            hom_ref_counts.name = 'hom_ref_counts'
-            # dropping all homozygous reference variants
-            df_format = df_format[df_format['zygosity'] != 'hom-ref']
-            df_format = df_format.join(hom_ref_counts)
-            df_format['hom_ref_counts'].fillna(value=0, inplace=True)
-
-        del df_format['sample_genotypes']
-        df_format.set_index('sample_ids', inplace=True, append=True, drop=True)
-
-        # JOINING QUAL INFO BACK TO DF
-        if format.count(':') > 0 and len(df_qual) > 0:
-            df_format = df_format.join(df_qual, how='left')
-            pass
-
-        # SPLITTING GENOTYPE QUALITY COLUMNS
-        if split_columns != '':
-            for col in split_columns:
-                split_col_names = [col + '_' + str(n)
-                                   for n in range(0, split_columns[col])]
-                df_format = df_format.join(pd.DataFrame(list(df_format[col].str.split(',').str[:len(split_col_names)]),
-                                                        index=df_format.index,
-                                                        columns=split_col_names))
-                del df_format[col]
-
-        parsed_df.append(df_format)
-
-    if len(parsed_df) > 0:
-        df_annot = pd.concat(parsed_df)
-        # reseting sample_ids from index
-        df_annot.reset_index('sample_ids', drop=False, inplace=True)
-        return df_annot
-    else:
-        print('No Annotations generated, please check for excessive missing values')
-        return df_vars
 
 
 def df_split(df, split_level):
@@ -533,7 +233,7 @@ def df_split(df, split_level):
 
     """
     row_count = len(df)
-    split_size = row_count / split_level
+    split_size = int(row_count / split_level)
     split_df = []
     for n, i in enumerate(range(0, row_count, split_size)):
         if n + 1 == split_level:
@@ -544,8 +244,8 @@ def df_split(df, split_level):
     return split_df
 
 
-def mp_variant_annotations(df_mp, df_split_cols, df_sampleid,
-                           drop_hom_ref, n_cores=1):
+def mp_variant_annotations(df_mp, df_split_cols='', df_sampleid='all',
+                           drop_hom_ref=True, n_cores=1):
     """
     Multiprocessing variant annotations
 
@@ -577,24 +277,36 @@ def mp_variant_annotations(df_mp, df_split_cols, df_sampleid,
         Number of multiprocessing jobs to start.
         Be careful as memory is copied to each process, RAM intensive
     """
-
+    from functools import partial
+    import multiprocessing as mp
+    import gc
+    
+    print('starting multiprocessing')
     pool = mp.Pool(int(n_cores))
     # tasks = np.array_split(df_mp.copy(), int(n_cores))  #breaks with older
     # pandas/numpy
-    tasks = df_split(df_mp.copy(), int(n_cores))
-    tasks = [
-        [pd.DataFrame(t), df_split_cols, df_sampleid, drop_hom_ref] for t in tasks]
+    dfs = df_split(df_mp.copy(), int(n_cores))
+
+    mp_process =  partial(process_variant_annotations, sample_id=df_sampleid,
+                 split_columns=df_split_cols, drop_hom_ref=drop_hom_ref)
+                
     results = []
     del df_mp
     gc.collect()
-    r = pool.map_async(
-        process_variant_annotations, tasks, callback=results.append)
+    r = pool.map_async(mp_process, \
+                       dfs, callback=results.append)
     r.wait()
     pool.close()
     pool.join()
     pool.terminate()
 
-    return pd.concat(results[0])
+    print('multiprocessing complete')
+    res_df = pd.concat([df for df in results[0] if len(df) > 0])
+
+    cat_cols = ['vartype1', 'vartype2', 'a1', 'a2', \
+                 'GT1', 'GT2', 'GT','sample_ids', 'zygosity']
+    res_df.loc[:, cat_cols] = res_df[cat_cols].astype('category')
+    return res_df
 
 
 def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
@@ -644,47 +356,245 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
 
 
     """
-
-    df['multiallele'] = df.ALT.str.count(',')
+   
+    df.loc[:, 'multiallele'] = df.ALT.str.count(',')
     multidf = df[df['multiallele'] > 0]
 
-    while len(df) + len(multidf) > 0:
+    while len(df) > 0:
     
-        if len(multidf) > 0:
-            df = df[~df.index.isin(multidf.index)]
-            multidf = get_multiallelic_bases(multidf,
-                                             sample_name,
-                                             single_sample_vcf=False)
+        
+        df = add_allelic_bases(df, sample_name)
 
-        # print 'single alleles', len(df)
-
-        df = get_biallelic_bases(df, sample_name)
-
-        if len(multidf) > 0:
-            df = df.append(multidf)
 
         df = zygosity_fast(df)
 
-        df['vartype1'] = map(vartype_map, df[['REF', 'a1']].values)
-        df['vartype2'] = map(vartype_map, df[['REF', 'a2']].values)
+        df.loc[:, 'vartype1'] = [vtype for vtype in map(vartype_map, df[['REF', 'a1']].values)]
+        df.loc[:, 'vartype2'] = [vtype for vtype in map(vartype_map, df[['REF', 'a2']].values)]
 
-        df.set_index(['CHROM', 'POS', 'REF', 'ALT', 'sample_ids'],
-                     inplace=True)
+        cat_cols = ['vartype1', 'vartype2', 'a1', 'a2', 'GT1', 'GT2', 'sample_genotypes', 'phase']
+        df.loc[:, cat_cols] = df[cat_cols].astype('category')
 
-        # df.sortlevel(level=['CHROM','POS','REF','ALT','sample_ids'],inplace=True)
-        # #sorting biallelic and multiallele variants
 
-        # print 'before parse_single_genotype_data', len(df)
-
-        # df = df.join( parse_single_genotype_data(df, sample_name, split_cols=split_columns), how='left' )
-        df['GT'] = df['sample_genotypes']
+        df.loc[:, 'GT'] = df['sample_genotypes'].astype('category')
         del df[sample_name]
         if 'FORMAT' in df.columns:
             del df['FORMAT']
 
-        df.reset_index(level=4, inplace=True, drop=True)
-        df.set_index('GT', inplace=True, drop=False, append=True)
-        # print df
+
         return df
 
     return pd.DataFrame()
+
+
+def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop_hom_ref=False):
+    """
+    This function stacks a pandas vcf dataframe and adds annotations for
+    each genotype
+
+    This function adds the following annotations to each variant:
+
+        multiallele: {0,1} 0=biallele  1=multiallelic
+
+        phase: {'/', '|'} /=unphased, |=phased
+
+        a1: DNA base representation of allele1 call, e.g. A
+        a2: DNA base representation of allele2 call, e.g. A
+
+        GT1: numeric representation of allele1 call, e.g. 0
+        GT2: numeric representation of allele2 call, e.g. 1
+
+        vartype1: {snp, mnp, ins, del, indel or SV} variant type of first allele
+        vartype2: {snp, mnp, ins, del, indel or SV} variant type of second allele
+
+        zygosity: {het-ref, hom-ref, alt-ref, het-miss, hom-miss}
+
+        FORMAT values: any values associated with the genotype calls are
+        added as additional columns, split_columns are further
+        split by ',' into individual columns
+    """
+    #df_vars, split_columns, sample_id, drop_hom_ref = df_vars_split_cols_sample_id_drop_hom_ref
+
+    
+    def _format_preprocess(df, sample_id):
+        
+         # dropping missing ALT alleles
+        df = df[df['ALT'] != '.']
+        df = df[['CHROM', 'POS', 'REF', 'ALT'] + sample_id]  # only consider sample columns
+        # replacing missing calls with None
+        df = df.replace(to_replace='.', value=np.NaN)
+
+        # stacks sample calls and drops none calls
+        
+        df = df.set_index(['CHROM', 'POS', 'REF', 'ALT'])
+
+        df = pd.DataFrame(df.stack(),
+                          columns=['sample_genotypes'])
+        df.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']
+        
+        return df.reset_index()
+    
+    
+    def _sampleid_preprocess(df):
+        ''' Identifies sample columns
+        '''
+        s_ids = set(df.columns) - set(['CHROM', 'POS', 'REF', 'ALT', \
+                                           'ID', 'QUAL', 'FILTER', 'INFO','FORMAT'])   
+        return list(s_ids)
+    
+    
+    def _qual_preprocess(df, form):
+        ''' Creates dataframe with non-GT data for each genotype call,
+        often quality data
+        '''
+         # qual df, setting aside for later joining
+        df_qual = pd.DataFrame(list(df['sample_genotypes'].str.split(':')),
+                               index=df.index)
+        # print df_format.head(), format.split(':')
+        df_qual.columns = form.split(':')  # setting quality column names
+        # setting index names for joining with df_format later
+        df_qual.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']
+        # setting just the GT calls
+        df['sample_genotypes'] = df_qual[form.split(':')[0]]
+        # removing from df_qual to avoid joining problems with df_format
+        # after add_annotations
+        del df_qual['GT']
+        return df_qual
+    
+
+    def _missing_preprocess(df):
+        '''Filters dataframe for missing values
+        '''
+        df_nonmissing = df[(df['sample_genotypes'] != './.') &
+                           (df['sample_genotypes'] != '.|.') &
+                           (df['sample_genotypes'] != '.')]
+        
+        return df_nonmissing
+    
+
+    def _coordinate_variant_annotation(df_format, sample_id):
+        '''Coordinates missing dataframe, non-GT field parsing,
+           variant annotation
+        '''
+        
+        df_format = _format_preprocess(df_format, sample_id)
+        
+        if len(df_format) < 1:  # occurs when all calls are empty
+            return pd.DataFrame()
+
+        # SAVE QUALITY INFORMATION SEPARETELY TO AVOID ANNOTATION PROCESSING
+        # IDENTICAL GENOTYPE CALLS (DIFFERENT QUALITY DOESNT MATTER)
+        if form.count(':') > 0:
+            df_qual = _preprocess_qual(df_format, form)
+
+        # DROPPING MISSING CALLS
+        df_format = _missing_preprocess(df_format)
+        
+        
+        # SETTING INDICES
+        # setting index names
+        # df_format.index.names = ['CHROM', 'POS', 'REF', 'ALT', 'sample_ids']
+        # df_format = df_format.reset_index()
+        
+        # ONLY NEED TO PASS UNIQUE GENOTYPE CALLS DF TO get_vcf_annotations,
+        # then broadcast back to df_format
+        annot_cols = ['CHROM', 'POS','REF', 'ALT','sample_genotypes']
+        df_annotations = df_format[annot_cols].drop_duplicates(subset=annot_cols)
+        
+        df_annotations.loc[:, 'FORMAT'] = form.split(':')[0]  # setting format id
+
+        # get variant annotations
+        df_annotations = get_vcf_annotations(df_annotations,
+                                             'sample_genotypes',
+                                             split_columns=split_columns)
+
+        # BROADCASTING VARIANT ANNOTATIONS BACK TO SAMPLE GENOTYPE DF
+        if len(df_annotations) < 1:
+            return pd.DataFrame()  # continue if no variants within this FORMAT category
+
+        df_format.rename(columns={'sample_genotypes':'GT'}, inplace=True)
+        df_format.loc[:, 'GT'] = df_format.astype('category')
+        df_format = df_format.merge(df_annotations, how='left',
+                                  left_on = ['CHROM', 'POS', 'REF', 'ALT','GT'],
+                                  right_on = ['CHROM', 'POS', 'REF', 'ALT','GT'])
+
+        del df_annotations
+        gc.collect()
+        # df_format.set_index('sample_ids', drop=True, inplace=True, append=True)
+        df_format.loc[:, 'FORMAT'] = form
+
+
+        # DROPPING HOMOZYGOUS REFERENCE VARIANTS IF SPECIFIED BY USER
+        hom_ref_counts = get_hom_ref_counts(df_format)
+        df_format = df_format.merge(hom_ref_counts, how='left', \
+                                        left_on=['CHROM', 'POS','REF','ALT'], \
+                                        right_on=['CHROM', 'POS','REF','ALT'])
+        df_format['hom_ref_counts'].fillna(value=0, inplace=True)
+        df_format.loc[:, 'hom_ref_counts'] = df_format['hom_ref_counts'].astype(np.uint8)
+    
+        if drop_hom_ref:
+            # dropping all homozygous reference variants
+            df_format = df_format[df_format['zygosity'] != 'hom-ref']
+            
+        # JOINING QUAL INFO BACK TO DF, IF NON-GT FIELDS IN SAMPLE COLUMNS
+        if form.count(':') > 0 and len(df_qual) > 0:
+            df_format = df_format.merge(df_qual, how='left',
+                                      left_on = ['CHROM', 'POS', 'REF', 'ALT', 'GT', 'sample_ids'],
+                                      right_on = ['CHROM', 'POS', 'REF', 'ALT', 'GT', 'sample_ids'])
+            del df_qual
+            gc.collect()
+            pass
+
+        # SPLITTING GENOTYPE QUALITY COLUMNS, IF SPECIFIED BY USER
+        if split_columns != '':
+            for col in split_columns:
+                split_col_names = [col + '_' + str(n)
+                                   for n in range(0, split_columns[col])]
+                df_format = df_format.join(pd.DataFrame(list(df_format[col].str.split(',').str[:len(split_col_names)]),
+                                                        index=df_format.index,
+                                                        columns=split_col_names))
+                del df_format[col]
+    
+    
+        return df_format
+    
+    
+    if '#CHROM' in df_vars.columns:
+        df_vars = df_vars.rename(columns={'#CHROM':'CHROM'}).set_index(['CHROM', 'POS', 'REF', 'ALT'],drop=False)   
+        
+    if sample_id == 'all':
+        sample_id = _sampleid_preprocess(df_vars)
+    
+    df_groups = df_vars.groupby('FORMAT')
+
+    parsed_df = []
+    # iterate through different FORMAT types
+    for form, df_format in df_groups:
+
+        df_format = _coordinate_variant_annotation(df_format, sample_id)
+                
+        parsed_df.append(df_format)
+
+    if len(parsed_df) > 0:
+        df_annot = pd.concat(parsed_df)
+        df_annot.loc[:, ['sample_ids', 'FORMAT']] = df_annot[['sample_ids', 'FORMAT']].astype('category')
+        df_annot.loc[:, ['multiallele']] = df_annot[['multiallele']].astype(np.uint8)
+        if 'hom_ref_counts' not in df_annot.columns:
+            df_annot.loc[:, 'hom_ref_counts'] = -1
+        df_annot.loc[:, 'hom_ref_counts'] = df_annot['hom_ref_counts'].astype(np.uint8)
+        
+        return df_annot
+    else:
+        print('No Annotations generated, please check for excessive missing values')
+        return pd.DataFrame()
+
+
+
+
+
+
+
+
+
+
+
+
