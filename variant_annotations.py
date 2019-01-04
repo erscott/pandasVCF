@@ -173,7 +173,7 @@ def get_hom_ref_counts(df):
     hom_ref = df.groupby(['CHROM', 'POS', 'REF', 'ALT'])['zygosity'].value_counts().xs('hom-ref',level=4)
     hom_ref = pd.DataFrame(hom_ref).reset_index()
     hom_ref = hom_ref.rename(columns={'zygosity':'hom_ref_counts'})
-    return hom_ref.reset_index()
+    return hom_ref
 
 
 def parse_single_genotype_data(df, sample_id, split_cols=''):
@@ -416,7 +416,9 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
 
     
     def _format_preprocess(df, sample_id):
-        
+        """
+        Handles stacking the wide dataframe into a long dataframe of sample genotypes
+        """
          # dropping missing ALT alleles
         df = df[df['ALT'] != '.']
         df = df[['CHROM', 'POS', 'REF', 'ALT'] + sample_id]  # only consider sample columns
@@ -435,17 +437,19 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
     
     
     def _sampleid_preprocess(df):
-        ''' Identifies sample columns
-        '''
+        """
+        Identifies sample columns
+        """
         s_ids = set(df.columns) - set(['CHROM', 'POS', 'REF', 'ALT', \
                                            'ID', 'QUAL', 'FILTER', 'INFO','FORMAT'])   
         return list(s_ids)
     
     
     def _qual_preprocess(df, form):
-        ''' Creates dataframe with non-GT data for each genotype call,
+        """
+        Creates dataframe with non-GT data for each genotype call,
         often quality data
-        '''
+        """
          # qual df, setting aside for later joining
         df_qual = pd.DataFrame(list(df['sample_genotypes'].str.split(':')),
                                index=df.index)
@@ -462,8 +466,9 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
     
 
     def _missing_preprocess(df):
-        '''Filters dataframe for missing values
-        '''
+        """
+        Filters dataframe for missing values
+        """
         df_nonmissing = df[(df['sample_genotypes'] != './.') &
                            (df['sample_genotypes'] != '.|.') &
                            (df['sample_genotypes'] != '.')]
@@ -472,9 +477,25 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
     
 
     def _coordinate_variant_annotation(df_format, sample_id):
-        '''Coordinates missing dataframe, non-GT field parsing,
-           variant annotation
-        '''
+        """
+        Coordinates variant annotations, hom-ref counting and dropping,
+        and stacking into a tidy df 
+
+       Parameters
+        --------------
+        df_format: pandas DataFrame, required
+                    pd.DataFrame containing CHROM, POS, REF, ALT, sample genotype cols
+
+        sample_id: list, required
+                    list of sample genotype columns 
+
+
+        Output
+        --------------
+        This function produces the df_annot dataframe containing the following columns:
+        CHROM, POS, REF, ALT, GT, GT1, GT2, a1, a2, multiallele, phase, zygosity,
+        vartype1, vartype2, FORMAT, hom_ref_counts
+        """
         
         df_format = _format_preprocess(df_format, sample_id)
         
