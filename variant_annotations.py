@@ -724,6 +724,10 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
                                                                        .str[:len(split_col_names)]),
                                                             index=df_format.index,
                                                             columns=split_col_names)
+                        try:
+                            split_col_df = split_col_df.astype(np.float)
+                        except:
+                            pass
                         df_format = df_format.join(split_col_df)
                         del df_format[col]
                     except AssertionError:
@@ -732,6 +736,10 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
                                'Leaving {} unparsed.'.format(col))
                         print()
                 else:
+                    try:
+                        df_format.loc[:, col] = df_format[col].astype(np.float)
+                    except:
+                        pass
                     continue
         return df_format
 
