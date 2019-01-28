@@ -119,8 +119,7 @@ def zygosity_fast(df):
 
     df_zygosity = pd.concat([df_hom_ref, df_hom_miss,
                              df_het_miss, df_het_ref,
-                             df_het_alt, df_hom_alt],
-                             sort=True)
+                             df_het_alt, df_hom_alt])
 
     df_zygosity.loc[:, 'zygosity'] = df_zygosity['zygosity'].astype('category')
     # return df_zygosity
