@@ -679,7 +679,7 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
             return pd.DataFrame()  # continue if no variants within this FORMAT category
 
         df_format.rename(columns={'sample_genotypes':'GT'}, inplace=True)
-        df_format.loc[:, 'GT'] = df_format.astype('category')
+        df_format.loc[:, 'GT'] = df_format['GT'].astype('category')
         df_format = df_format.merge(df_annotations, how='left',
                                   left_on = ['CHROM', 'POS', 'REF', 'ALT','GT'],
                                   right_on = ['CHROM', 'POS', 'REF', 'ALT','GT'])
