@@ -516,7 +516,8 @@ def get_vcf_annotations(df, sample_name, split_columns='', drop_hom_ref=True):
         df.loc[:, 'vartype2'] = [vtype for vtype in map(vartype_map, df[['REF', 'a2']].values)]
 
         cat_cols = ['vartype1', 'vartype2', 'a1', 'a2', 'GT1', 'GT2', 'sample_genotypes', 'phase']
-        df.loc[:, cat_cols] = df[cat_cols].astype('category')
+        for c in cat_cols:
+            df.loc[:, c] = df[c].astype('category')
 
 
         df.loc[:, 'GT'] = df['sample_genotypes'].astype('category')
