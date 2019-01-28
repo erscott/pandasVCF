@@ -754,7 +754,9 @@ def process_variant_annotations(df_vars, sample_id='all', split_columns='', drop
 
     if len(parsed_df) > 0:
         df_annot = pd.concat(parsed_df)
-        df_annot.loc[:, ['sample_ids', 'FORMAT']] = df_annot[['sample_ids', 'FORMAT']].astype('category')
+        
+        for c in ['sample_ids', 'FORMAT']:
+        df_annot.loc[:, c] = df_annot[c].astype('category')
         df_annot.loc[:, ['multiallele']] = df_annot[['multiallele']].astype(np.uint8)
         if 'hom_ref_counts' not in df_annot.columns:
             df_annot.loc[:, 'hom_ref_counts'] = -1
