@@ -82,7 +82,7 @@ class VCF(object):
         # header parsed into key/values dataframe
         self.header_df = self.get_header_df(header_parsed.header)
         # Sample IDs
-        self.samples = list(self.header_df.ix['SampleIDs'])[0]
+        self.samples = list(self.header_df.loc['SampleIDs'])[0]
         self.sample_id = self.get_sample_ids(sample_id)
 
         self.set_cols(cols)
