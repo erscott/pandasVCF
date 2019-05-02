@@ -274,7 +274,7 @@ class VCF(object):
                                                  n_cores=n_cores,
                                                  df_split_cols=split_columns,
                                                  df_sampleid=self.sample_id,
-                                                 drop_hom_ref=sdrop_hom_ref)
+                                                 drop_hom_ref=drop_hom_ref)
             else:
                 self.df_annot = mp_variant_annotations(self.df, 
                                                  n_cores=n_cores,
