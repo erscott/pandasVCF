@@ -133,7 +133,7 @@ class VCF(object):
 
     def set_cols(self, cols):
         # Columns
-        self.all_columns = list(self.header_df.ix['ColumnHeader'])[0]
+        self.all_columns = list(self.header_df.loc['ColumnHeader'])[0]
         self.FORMAT = self.all_columns[8]
 
         assert len(set(cols) & set(['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT'])) > 4, "cols requires the following columns: ['#CHROM', 'POS', 'REF', 'ALT', 'FORMAT']"
